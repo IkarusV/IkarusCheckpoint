@@ -32,8 +32,7 @@
         const defaults = {
             enabled: true,
             showDock: true,
-            enabled: true,
-            showDock: true,
+            showNotifications: true,
             windowX: null, windowY: null,
             windowW: 380, windowH: 520,
             notes: {},
@@ -114,6 +113,7 @@
         };
         bindCheck('ikcp-enabled', 'enabled', updateDockVisibility);
         bindCheck('ikcp-show-dock', 'showDock', updateDockVisibility);
+        bindCheck('ikcp-show-notifs', 'showNotifications');
 
         document.getElementById('ikcp-open-window')?.addEventListener('click', () => showWindow());
     }
@@ -361,7 +361,9 @@
                 body: JSON.stringify({
                     ch_name: charName,
                     file_name: newName,
-                    chat: chatData
+                    avatar_url: charAvatar,
+                    chat: chatData,
+                    force: true,
                 })
             });
             if (!saveRes.ok) throw new Error('Failed to create new branch.');
@@ -390,7 +392,7 @@
             return;
         }
 
-        toastr?.info(`Scanning chats for ${charName}...`, EXT_DISPLAY);
+        if (getSettings().showNotifications) toastr?.info(`Scanning chats for ${charName}...`, EXT_DISPLAY);
 
         const cpList = _windowEl?.querySelector('[data-list="checkpoints"]');
         const brList = _windowEl?.querySelector('[data-list="branches"]');
@@ -507,11 +509,13 @@
             };
 
             const totalChats = chatFiles.length;
-            toastr?.success(
-                `${charName} scan complete! ${totalChats} chat${totalChats !== 1 ? 's' : ''} · ${allCheckpoints.length} checkpoint${allCheckpoints.length !== 1 ? 's' : ''} · ${allBranches.length} branch${allBranches.length !== 1 ? 'es' : ''}`,
-                EXT_DISPLAY,
-                { timeOut: 6000 }
-            );
+            if (getSettings().showNotifications) {
+                toastr?.success(
+                    `${charName} scan complete! ${totalChats} chat${totalChats !== 1 ? 's' : ''} · ${allCheckpoints.length} checkpoint${allCheckpoints.length !== 1 ? 's' : ''} · ${allBranches.length} branch${allBranches.length !== 1 ? 'es' : ''}`,
+                    EXT_DISPLAY,
+                    { timeOut: 6000 }
+                );
+            }
 
             // Re-render
             renderFromCache();
