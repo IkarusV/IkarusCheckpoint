@@ -13,6 +13,11 @@ A lightweight, game-save-inspired floating checkpoint and branch manager for [Si
 - **Search & Sort** — Filter by name or your custom notes, and sort by creation date or alphabetically.
 - **Context Estimates** — Displays the exact message count and approximate context size per checkpoint/branch.
 - **Dock Icon & Wand Menu** — Accessible via an optional floating screen-edge dock icon or SillyTavern's native extensions wand menu.
+<img width="792" height="1056" alt="image" src="https://github.com/user-attachments/assets/65b2c5cf-b056-486a-bc44-3f8bbc5c2c23" />
+
+<img width="900" height="1244" alt="image" src="https://github.com/user-attachments/assets/2d022685-d9dd-40f8-9a65-ecba523f2dc1" />
+
+
 
 ## Installation
 
