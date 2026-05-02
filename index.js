@@ -665,6 +665,10 @@
 
     // ── Window Mechanics ────────────────────────────────────────
 
+    function isMobile() {
+        return window.innerWidth <= 900 || ('ontouchstart' in window && window.innerWidth <= 1366);
+    }
+
     function setupDrag(win) {
         const header = win.querySelector('.ikcp-header');
         if (!header) return;
@@ -672,6 +676,7 @@
         let startX, startY, startLeft, startTop;
 
         header.addEventListener('mousedown', (e) => {
+            if (isMobile()) return;
             if (e.target.closest('.ikcp-hbtn')) return;
             isDragging = true;
             win.classList.add('ikcp-dragging');
@@ -710,6 +715,7 @@
 
         handles.forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
+                if (isMobile()) return;
                 isResizing = true;
                 resizeDir = handle.dataset.dir;
                 win.classList.add('ikcp-resizing');

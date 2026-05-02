@@ -528,3 +528,21 @@
 .ikcp-settings .ikcp-settings-section {
     padding: 6px 0;
 }
+
+/* ── Mobile / Tablet Optimization ────────────────────────────── */
+
+@media screen and (max-width: 900px) {
+    .ikcp-window {
+        width: min(94vw, 560px) !important;
+        height: min(82dvh, 700px) !important;
+        left: 3vw !important;
+        top: 8vh !important;
+        min-width: unset !important;
+        max-width: calc(100vw - 10px) !important;
+    }
+    
+    .ikcp-dock-icon {
+        bottom: max(100px, calc(env(safe-area-inset-bottom, 0px) + 80px));
+        right: max(14px, env(safe-area-inset-right, 14px));
+    }
+}
