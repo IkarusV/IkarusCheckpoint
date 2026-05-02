@@ -2,8 +2,7 @@
     'use strict';
 
     // ═══════════════════════════════════════════════════════════════
-    //  IKARUS CHECKPOINT — index.js
-    //  Floating checkpoint/branch navigator for SillyTavern
+    //  IKARUS CHECKPOINT — index.js (Character-level Hub Redesign)
     // ═══════════════════════════════════════════════════════════════
 
     const EXT_NAME = 'ikarus_checkpoint';
@@ -11,7 +10,6 @@
     const WIN_ID = 'ikcp-window';
     const DOCK_ID = 'ikcp-dock-icon';
 
-    // ── Extension path detection (ST-Copilot pattern) ───────────
     let __extPath = 'third-party/IkarusCheckpoint';
     if (document.currentScript && document.currentScript.src) {
         const match = new URL(document.currentScript.src).pathname
@@ -19,15 +17,13 @@
         if (match) __extPath = match[1];
     }
 
-    // ── State ────────────────────────────────────────────────────
     let _windowEl = null;
     let _dockEl = null;
     let _isOpen = false;
-    let _scanCache = null;       // { checkpoints: [], branches: [] }
     let _currentFilter = '';
-    let _detailsCache = {};      // fileName -> { messageCount, contextSize }
-
-    // ── Settings ─────────────────────────────────────────────────
+    
+    // Cache per character: characterId -> { checkpoints: [], branches: [] }
+    let _characterHubCache = {};
 
     function getSettings() {
         const { extensionSettings } = SillyTavern.getContext();
@@ -36,12 +32,10 @@
         const defaults = {
             enabled: true,
             showDock: true,
-            hotkeyEnabled: false,
-            hotkey: 'Alt+K',
-            windowX: null,
-            windowY: null,
-            windowW: 380,
-            windowH: 520,
+            hotkeyEnabled: true,
+            hotkey: 'Alt+k', // lowercase for easier matching
+            windowX: null, windowY: null,
+            windowW: 380, windowH: 520,
             notes: {},
             checkpointsCollapsed: false,
             branchesCollapsed: true,
@@ -57,8 +51,6 @@
         SillyTavern.getContext().saveSettingsDebounced();
     }
 
-    // ── Helpers ──────────────────────────────────────────────────
-
     function escHtml(str) {
         const d = document.createElement('div');
         d.textContent = str;
@@ -70,26 +62,16 @@
         return `~${Math.round(charCount / 1000)}K`;
     }
 
-    function getCharacterName() {
+    function getCharacterId() { return SillyTavern.getContext().characterId; }
+    function getCharacter() { 
         const ctx = SillyTavern.getContext();
-        if (ctx.characterId !== undefined && ctx.characters && ctx.characters[ctx.characterId]) {
-            return ctx.characters[ctx.characterId].name || '';
-        }
-        return '';
+        return (ctx.characterId !== undefined && ctx.characters) ? ctx.characters[ctx.characterId] : null;
     }
-
-    function isInCheckpoint() {
-        const ctx = SillyTavern.getContext();
-        return !!(ctx.chatMetadata && ctx.chatMetadata.main_chat);
-    }
-
-    // ── Init ─────────────────────────────────────────────────────
+    function getCharacterName() { return getCharacter()?.name || ''; }
+    function getCharacterAvatar() { return getCharacter()?.avatar || ''; }
 
     async function init() {
         const ctx = SillyTavern.getContext();
-        const s = getSettings();
-
-        // Load settings panel
         try {
             const container = document.getElementById('extensions_settings2');
             if (container) {
@@ -97,106 +79,61 @@
                 container.insertAdjacentHTML('beforeend', html);
                 loadSettingsUI();
             }
-        } catch (e) {
-            console.error(`[${EXT_DISPLAY}] Failed to load settings panel:`, e);
-        }
+        } catch (e) { console.error(`[${EXT_DISPLAY}] Settings load failed:`, e); }
 
-        // Build the floating window + dock icon
         injectUI();
-
-        // Wand menu button
         addWandButton();
-
-        // Hotkey listener
         setupHotkey();
+        updateDockVisibility();
 
-        // Listen for chat changes
+        // When chat changes, we don't automatically rescan all chats (too slow).
+        // We just re-render from cache if the window is open.
         const es = ctx.eventSource;
         const et = ctx.event_types;
         if (es && et) {
             es.on(et.CHAT_CHANGED, onChatChanged);
         }
-
-        // Show/hide dock based on setting
-        updateDockVisibility();
-
-        console.log(`[${EXT_DISPLAY}] Initialized.`);
+        console.log(`[${EXT_DISPLAY}] Hub Initialized.`);
     }
-
-    // ── Settings UI wiring ───────────────────────────────────────
 
     function loadSettingsUI() {
         const s = getSettings();
+        const bindCheck = (id, key, callback) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.checked = s[key];
+            el.addEventListener('change', () => { s[key] = el.checked; saveSettings(); if (callback) callback(); });
+        };
+        bindCheck('ikcp-enabled', 'enabled', updateDockVisibility);
+        bindCheck('ikcp-show-dock', 'showDock', updateDockVisibility);
+        bindCheck('ikcp-hotkey-enabled', 'hotkeyEnabled');
 
-        const elEnabled = document.getElementById('ikcp-enabled');
-        const elDock = document.getElementById('ikcp-show-dock');
-        const elHotkeyEnabled = document.getElementById('ikcp-hotkey-enabled');
         const elHotkey = document.getElementById('ikcp-hotkey');
-        const elOpenBtn = document.getElementById('ikcp-open-window');
-
-        if (elEnabled) {
-            elEnabled.checked = s.enabled;
-            elEnabled.addEventListener('change', () => {
-                s.enabled = elEnabled.checked;
-                saveSettings();
-                updateDockVisibility();
-            });
-        }
-        if (elDock) {
-            elDock.checked = s.showDock;
-            elDock.addEventListener('change', () => {
-                s.showDock = elDock.checked;
-                saveSettings();
-                updateDockVisibility();
-            });
-        }
-        if (elHotkeyEnabled) {
-            elHotkeyEnabled.checked = s.hotkeyEnabled;
-            elHotkeyEnabled.addEventListener('change', () => {
-                s.hotkeyEnabled = elHotkeyEnabled.checked;
-                saveSettings();
-            });
-        }
         if (elHotkey) {
             elHotkey.value = s.hotkey;
             elHotkey.addEventListener('change', () => {
-                s.hotkey = elHotkey.value.trim() || 'Alt+K';
+                s.hotkey = elHotkey.value.trim() || 'Alt+k';
                 saveSettings();
             });
         }
-        if (elOpenBtn) {
-            elOpenBtn.addEventListener('click', () => showWindow());
-        }
+        document.getElementById('ikcp-open-window')?.addEventListener('click', () => showWindow());
     }
 
     function updateDockVisibility() {
         const s = getSettings();
-        if (_dockEl) {
-            _dockEl.style.display = (s.enabled && s.showDock) ? 'flex' : 'none';
-        }
+        if (_dockEl) _dockEl.style.display = (s.enabled && s.showDock) ? 'flex' : 'none';
     }
 
-    // ── Event handler ────────────────────────────────────────────
-
     function onChatChanged() {
-        _scanCache = null;
-        _detailsCache = {};
-        _currentFilter = '';
-        if (_isOpen) {
-            refreshContent();
-        }
-        // Update character badge
         if (_windowEl) {
             const badge = _windowEl.querySelector('.ikcp-char-badge');
             if (badge) badge.textContent = getCharacterName() || '—';
         }
+        if (_isOpen) {
+            // Render from cache for this character. If empty, it will show empty state or prompt to scan.
+            renderFromCache();
+        }
     }
-
-    // (All functions implemented inline below)
-
-    // ═══════════════════════════════════════════════════════════════
-    //  PART 2 — UI INJECTION
-    // ═══════════════════════════════════════════════════════════════
 
     function buildWindowHTML() {
         const s = getSettings();
@@ -217,10 +154,13 @@
         <div class="ikcp-header">
             <div class="ikcp-header-left">
                 <span class="ikcp-logo"><i class="fa-solid fa-bookmark"></i></span>
-                <span class="ikcp-title">IKARUS CHECKPOINT</span>
+                <span class="ikcp-title">IKARUS HUB</span>
                 <span class="ikcp-char-badge">${escHtml(charName)}</span>
             </div>
             <div class="ikcp-header-right">
+                <button class="ikcp-hbtn ikcp-btn-sync" title="Sync All Character Chats" data-action="sync-all">
+                    <i class="fa-solid fa-rotate"></i>
+                </button>
                 <button class="ikcp-hbtn ikcp-btn-minimize" title="Minimize">
                     <i class="fa-solid fa-minus"></i>
                 </button>
@@ -234,9 +174,8 @@
             <div class="ikcp-section" data-section="checkpoints">
                 <div class="ikcp-section-header${cpCollapsed}">
                     <span class="ikcp-section-chevron"><i class="fa-solid fa-chevron-down"></i></span>
-                    <span class="ikcp-section-title">CHECKPOINTS</span>
+                    <span class="ikcp-section-title">ALL CHECKPOINTS</span>
                     <span class="ikcp-section-count">(0)</span>
-                    <button class="ikcp-section-action" data-action="new-checkpoint">+ New</button>
                 </div>
                 <div class="ikcp-section-body">
                     <div class="ikcp-search-bar">
@@ -244,7 +183,7 @@
                         <button class="ikcp-sort-btn" data-target="checkpoints" title="Toggle sort">${s.sortMode === 'name' ? '↓ A-Z' : '↓ Date'}</button>
                     </div>
                     <div class="ikcp-card-list" data-list="checkpoints">
-                        <div class="ikcp-loading"><div class="ikcp-spinner"></div>Scanning…</div>
+                        <div class="ikcp-empty">Click Sync (top right) to scan character chats.</div>
                     </div>
                 </div>
             </div>
@@ -252,7 +191,7 @@
             <div class="ikcp-section" data-section="branches">
                 <div class="ikcp-section-header${brCollapsed}">
                     <span class="ikcp-section-chevron"><i class="fa-solid fa-chevron-down"></i></span>
-                    <span class="ikcp-section-title">BRANCHES</span>
+                    <span class="ikcp-section-title">ALL BRANCHES</span>
                     <span class="ikcp-section-count">(0)</span>
                 </div>
                 <div class="ikcp-section-body">
@@ -260,34 +199,25 @@
                         <input class="ikcp-search-input" type="text" placeholder="Search branches…" data-target="branches" />
                     </div>
                     <div class="ikcp-card-list" data-list="branches">
-                        <div class="ikcp-loading"><div class="ikcp-spinner"></div>Scanning…</div>
+                        <div class="ikcp-empty">Click Sync (top right) to scan character chats.</div>
                     </div>
                 </div>
             </div>
         </div>
-
-        <div class="ikcp-footer" style="display:none;">
-            <button class="ikcp-footer-btn" data-action="back-to-main">
-                <i class="fa-solid fa-arrow-left"></i> Back to Main Chat
-            </button>
-        </div>`;
+        `;
     }
 
     function injectUI() {
-        // Remove any existing instances
         document.getElementById(WIN_ID)?.remove();
         document.getElementById(DOCK_ID)?.remove();
 
         const s = getSettings();
-
-        // ── Build main window ──
         const win = document.createElement('div');
         win.id = WIN_ID;
         win.classList.add('ikcp-window');
-        win.style.display = 'none'; // hidden by default
+        win.style.display = 'none';
         win.innerHTML = buildWindowHTML();
 
-        // Apply saved position/size
         if (s.windowX !== null) win.style.left = s.windowX + 'px';
         if (s.windowY !== null) win.style.top = s.windowY + 'px';
         if (s.windowW) win.style.width = s.windowW + 'px';
@@ -297,361 +227,335 @@
         document.body.appendChild(win);
         _windowEl = win;
 
-        // ── Wire window event listeners ──
+        win.querySelector('.ikcp-hbtn-close').addEventListener('click', (e) => { e.stopPropagation(); hideWindow(); });
+        win.querySelector('.ikcp-btn-minimize').addEventListener('click', (e) => { e.stopPropagation(); hideWindow(); });
+        win.querySelector('.ikcp-btn-sync').addEventListener('click', (e) => { e.stopPropagation(); syncAllCharacterChats(); });
 
-        // Close button
-        win.querySelector('.ikcp-hbtn-close').addEventListener('click', (e) => {
-            e.stopPropagation();
-            hideWindow();
-        });
-
-        // Minimize button
-        win.querySelector('.ikcp-btn-minimize').addEventListener('click', (e) => {
-            e.stopPropagation();
-            hideWindow();
-        });
-
-        // Section collapse toggles
         win.querySelectorAll('.ikcp-section-header').forEach(header => {
             header.addEventListener('click', (e) => {
-                // Don't collapse if clicking the action button or search
                 if (e.target.closest('.ikcp-section-action')) return;
                 header.classList.toggle('collapsed');
                 const section = header.closest('.ikcp-section').dataset.section;
-                if (section === 'checkpoints') {
-                    s.checkpointsCollapsed = header.classList.contains('collapsed');
-                } else if (section === 'branches') {
-                    s.branchesCollapsed = header.classList.contains('collapsed');
-                }
+                if (section === 'checkpoints') s.checkpointsCollapsed = header.classList.contains('collapsed');
+                else if (section === 'branches') s.branchesCollapsed = header.classList.contains('collapsed');
                 saveSettings();
             });
         });
 
-        // New checkpoint button
-        win.querySelector('[data-action="new-checkpoint"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            createQuickCheckpoint();
-        });
-
-        // Back to main chat button
-        win.querySelector('[data-action="back-to-main"]')?.addEventListener('click', () => {
-            backToMain();
-        });
-
-        // Search inputs
         win.querySelectorAll('.ikcp-search-input').forEach(input => {
             input.addEventListener('input', (e) => {
                 _currentFilter = e.target.value.trim().toLowerCase();
-                // Sync both search bars
-                win.querySelectorAll('.ikcp-search-input').forEach(si => {
-                    if (si !== e.target) si.value = e.target.value;
-                });
+                win.querySelectorAll('.ikcp-search-input').forEach(si => { if (si !== e.target) si.value = e.target.value; });
                 renderFromCache();
             });
         });
 
-        // Sort button
         win.querySelectorAll('.ikcp-sort-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 s.sortMode = s.sortMode === 'date' ? 'name' : 'date';
                 saveSettings();
-                win.querySelectorAll('.ikcp-sort-btn').forEach(b => {
-                    b.textContent = s.sortMode === 'name' ? '↓ A-Z' : '↓ Date';
-                });
+                win.querySelectorAll('.ikcp-sort-btn').forEach(b => { b.textContent = s.sortMode === 'name' ? '↓ A-Z' : '↓ Date'; });
                 renderFromCache();
             });
         });
 
-        // Drag & resize
         setupDrag(win);
         setupResize(win);
 
-        // ── Build dock icon ──
         const dock = document.createElement('div');
         dock.id = DOCK_ID;
         dock.classList.add('ikcp-dock-icon');
         dock.innerHTML = '<i class="fa-solid fa-bookmark"></i>';
-        dock.title = 'Ikarus Checkpoint';
+        dock.title = 'Ikarus Checkpoint Hub';
         dock.addEventListener('click', () => toggleWindow());
         document.body.appendChild(dock);
         _dockEl = dock;
     }
-
-    // ── Show / Hide / Toggle ─────────────────────────────────────
 
     function showWindow() {
         const s = getSettings();
         if (!s.enabled || !_windowEl) return;
         _windowEl.style.display = 'flex';
         _isOpen = true;
-        // Update footer visibility based on checkpoint state
-        const footer = _windowEl.querySelector('.ikcp-footer');
-        if (footer) footer.style.display = isInCheckpoint() ? 'flex' : 'none';
-        // Update char badge
         const badge = _windowEl.querySelector('.ikcp-char-badge');
         if (badge) badge.textContent = getCharacterName() || '—';
-        // Trigger scan
-        refreshContent();
+        renderFromCache();
     }
 
     function hideWindow() {
-        if (_windowEl) {
-            _windowEl.style.display = 'none';
-        }
+        if (_windowEl) _windowEl.style.display = 'none';
         _isOpen = false;
     }
 
     function toggleWindow() {
-        if (_isOpen) {
-            hideWindow();
-        } else {
-            showWindow();
-        }
+        if (_isOpen) hideWindow();
+        else showWindow();
     }
-
-    // ── Navigation ───────────────────────────────────────────────
 
     async function navigateTo(fileName) {
         try {
-            const ctx = SillyTavern.getContext();
-            await ctx.openCharacterChat(fileName);
+            await SillyTavern.getContext().openCharacterChat(fileName.replace('.jsonl', ''));
         } catch (e) {
             console.error(`[${EXT_DISPLAY}] Navigate failed:`, e);
-            if (typeof toastr !== 'undefined') {
-                toastr.error(`Failed to open checkpoint: ${e.message}`, EXT_DISPLAY);
-            }
+            if (typeof toastr !== 'undefined') toastr.error(`Failed to open: ${e.message}`, EXT_DISPLAY);
         }
     }
 
-    async function backToMain() {
-        const ctx = SillyTavern.getContext();
-        const mainChat = ctx.chatMetadata?.main_chat;
-        if (mainChat) {
-            await navigateTo(mainChat);
-        } else {
-            if (typeof toastr !== 'undefined') {
-                toastr.warning('No main chat found — you may already be on it.', EXT_DISPLAY);
-            }
-        }
-    }
+    // ── Data Syncing ────────────────────────────────────────────
 
-    function createQuickCheckpoint() {
-        // Trigger ST's native bookmark creation button
-        const bookmarkBtn = document.getElementById('option_new_bookmark');
-        if (bookmarkBtn) {
-            $(bookmarkBtn).trigger('click');
-        } else {
-            if (typeof toastr !== 'undefined') {
-                toastr.warning('Bookmark button not found in SillyTavern UI.', EXT_DISPLAY);
-            }
-        }
-    }
-
-    // ── Notes ────────────────────────────────────────────────────
-
-    function saveNote(fileName, text) {
-        const s = getSettings();
-        if (text.trim()) {
-            s.notes[fileName] = text.trim();
-        } else {
-            delete s.notes[fileName];
-        }
-        saveSettings();
-    }
-
-    function getNote(fileName) {
-        return getSettings().notes[fileName] || '';
-    }
-
-    // ── Render from cache (used by filter/sort) ──────────────────
-
-    function renderFromCache() {
-        if (!_scanCache) return;
-        renderCheckpointList(_scanCache.checkpoints);
-        renderBranchList(_scanCache.branches);
-    }
-
-
-    // ═══════════════════════════════════════════════════════════════
-    //  PART 3 — SCANNING & RENDERING
-    // ═══════════════════════════════════════════════════════════════
-
-    function scanCheckpoints() {
-        const ctx = SillyTavern.getContext();
-        const chat = ctx.chat;
-        if (!chat || !chat.length) return { checkpoints: [], branches: [] };
-
-        const checkpoints = [];
-        const branches = [];
-        const seenBranches = new Set();
-
-        for (let i = 0; i < chat.length; i++) {
-            const msg = chat[i];
-            if (!msg || !msg.extra) continue;
-
-            // Checkpoint detection
-            if (msg.extra.bookmark_link) {
-                checkpoints.push({
-                    fileName: msg.extra.bookmark_link,
-                    messageIndex: i,
-                    name: msg.extra.bookmark_link,
-                    isUser: !!msg.is_user,
-                    sendDate: msg.send_date || '',
-                });
-            }
-
-            // Branch detection
-            if (msg.extra.branches && Array.isArray(msg.extra.branches)) {
-                for (const branchFile of msg.extra.branches) {
-                    if (!seenBranches.has(branchFile)) {
-                        seenBranches.add(branchFile);
-                        branches.push({
-                            fileName: branchFile,
-                            messageIndex: i,
-                            name: branchFile,
-                            sendDate: msg.send_date || '',
-                        });
-                    }
-                }
-            }
+    async function syncAllCharacterChats() {
+        const charId = getCharacterId();
+        const charAvatar = getCharacterAvatar();
+        const charName = getCharacterName();
+        if (charId === undefined || !charAvatar) {
+            toastr?.warning('No active character selected.', EXT_DISPLAY);
+            return;
         }
 
-        return { checkpoints, branches };
-    }
-
-    function estimateContextSize(chat) {
-        if (!chat || !chat.length) return 0;
-        let total = 0;
-        for (const msg of chat) {
-            if (msg && msg.mes && !msg.is_system) {
-                total += msg.mes.length;
-            }
-        }
-        return total;
-    }
-
-    async function fetchCheckpointDetails(fileName) {
-        if (_detailsCache[fileName]) return _detailsCache[fileName];
-
-        try {
-            const ctx = SillyTavern.getContext();
-            if (!ctx.characters || ctx.characterId === undefined) return null;
-
-            const response = await fetch('/api/chats/get', {
-                method: 'POST',
-                headers: ctx.getRequestHeaders(),
-                body: JSON.stringify({
-                    ch_name: ctx.characters[ctx.characterId].name,
-                    file_name: fileName,
-                    avatar_url: ctx.characters[ctx.characterId].avatar,
-                }),
-                cache: 'no-cache',
-            });
-
-            if (!response.ok) return null;
-
-            const chatData = await response.json();
-            if (!Array.isArray(chatData)) return null;
-
-            // First element is metadata
-            chatData.shift();
-            const messageCount = chatData.length;
-            const contextSize = estimateContextSize(chatData);
-
-            const details = { messageCount, contextSize };
-            _detailsCache[fileName] = details;
-            return details;
-        } catch (e) {
-            console.warn(`[${EXT_DISPLAY}] fetchCheckpointDetails failed for ${fileName}:`, e);
-            return null;
-        }
-    }
-
-    async function refreshContent() {
-        if (!_windowEl) return;
-
-        // Show loading spinners
         const cpList = _windowEl.querySelector('[data-list="checkpoints"]');
         const brList = _windowEl.querySelector('[data-list="branches"]');
-        if (cpList) cpList.innerHTML = '<div class="ikcp-loading"><div class="ikcp-spinner"></div>Scanning…</div>';
-        if (brList) brList.innerHTML = '<div class="ikcp-loading"><div class="ikcp-spinner"></div>Scanning…</div>';
+        if (cpList) cpList.innerHTML = '<div class="ikcp-loading"><div class="ikcp-spinner"></div>Syncing all chats...</div>';
+        if (brList) brList.innerHTML = '<div class="ikcp-loading"><div class="ikcp-spinner"></div>Syncing all chats...</div>';
 
-        // Update footer
-        const footer = _windowEl.querySelector('.ikcp-footer');
-        if (footer) footer.style.display = isInCheckpoint() ? 'flex' : 'none';
+        try {
+            // 1. Get all chats for character
+            const ctx = SillyTavern.getContext();
+            const listRes = await fetch('/api/characters/chats', {
+                method: 'POST',
+                body: JSON.stringify({ avatar_url: charAvatar }),
+                headers: ctx.getRequestHeaders(),
+            });
+            if (!listRes.ok) throw new Error('Failed to get chat list');
+            const chatDict = await listRes.json();
+            const chatFiles = Object.values(chatDict).map(c => c.file_name);
 
-        // Scan
-        _scanCache = scanCheckpoints();
+            let allCheckpoints = [];
+            let allBranches = [];
+            let seenBranches = new Set();
+            let seenCheckpoints = new Set();
 
-        // Update section counts
-        const cpCount = _windowEl.querySelector('[data-section="checkpoints"] .ikcp-section-count');
-        const brCount = _windowEl.querySelector('[data-section="branches"] .ikcp-section-count');
-        if (cpCount) cpCount.textContent = `(${_scanCache.checkpoints.length})`;
-        if (brCount) brCount.textContent = `(${_scanCache.branches.length})`;
+            // 2. Fetch each chat and scan
+            for (const file_name of chatFiles) {
+                const getRes = await fetch('/api/chats/get', {
+                    method: 'POST',
+                    headers: ctx.getRequestHeaders(),
+                    body: JSON.stringify({
+                        ch_name: charName,
+                        file_name: file_name.replace('.jsonl', ''),
+                        avatar_url: charAvatar,
+                    }),
+                    cache: 'no-cache',
+                });
+                if (!getRes.ok) continue;
+                
+                let chatData = await getRes.json();
+                if (!Array.isArray(chatData)) continue;
+                chatData.shift(); // remove metadata
 
-        // Render lists
-        renderCheckpointList(_scanCache.checkpoints);
-        renderBranchList(_scanCache.branches);
+                let totalContext = 0;
+                for (let i = 0; i < chatData.length; i++) {
+                    const msg = chatData[i];
+                    if (!msg) continue;
+                    if (msg.mes && !msg.is_system) totalContext += msg.mes.length;
 
-        // Fetch details in background (message counts)
-        const allItems = [..._scanCache.checkpoints, ..._scanCache.branches];
-        for (const item of allItems) {
-            fetchCheckpointDetails(item.fileName).then(details => {
-                if (!details || !_windowEl) return;
-                // Update the card if it exists
-                const card = _windowEl.querySelector(`[data-file="${CSS.escape(item.fileName)}"]`);
-                if (card) {
-                    const metaEl = card.querySelector('.ikcp-card-meta');
-                    if (metaEl) {
-                        const msgBadge = metaEl.querySelector('.ikcp-badge-msg-count');
-                        if (msgBadge) msgBadge.textContent = `${details.messageCount} msgs`;
-                        const ctxBadge = metaEl.querySelector('.ikcp-badge-accent');
-                        if (ctxBadge) ctxBadge.textContent = formatContextSize(details.contextSize);
+                    if (!msg.extra) continue;
+                    
+                    if (msg.extra.bookmark_link) {
+                        const link = msg.extra.bookmark_link;
+                        if (!seenCheckpoints.has(link)) {
+                            seenCheckpoints.add(link);
+                            allCheckpoints.push({
+                                fileName: link,
+                                sourceChat: file_name,
+                                messageIndex: i,
+                                name: link,
+                                sendDate: msg.send_date || '',
+                                // Estimate details using the point of branch
+                                // Real details would require fetching the checkpoint file itself, 
+                                // which we'll do asynchronously later if needed, or just keep it simple.
+                            });
+                        }
+                    }
+
+                    if (msg.extra.branches && Array.isArray(msg.extra.branches)) {
+                        for (const branchFile of msg.extra.branches) {
+                            if (!seenBranches.has(branchFile)) {
+                                seenBranches.add(branchFile);
+                                allBranches.push({
+                                    fileName: branchFile,
+                                    sourceChat: file_name,
+                                    messageIndex: i,
+                                    name: branchFile,
+                                    sendDate: msg.send_date || '',
+                                });
+                            }
+                        }
                     }
                 }
-            });
+            }
+
+            // Save to cache
+            _characterHubCache[charId] = {
+                checkpoints: allCheckpoints,
+                branches: allBranches
+            };
+
+            // Re-render
+            renderFromCache();
+
+            // Fire off async tasks to get exact message counts for these files
+            fetchDetailsBackground(charId, allCheckpoints, allBranches);
+
+        } catch (e) {
+            console.error(`[${EXT_DISPLAY}] Sync failed:`, e);
+            toastr?.error('Failed to sync character chats', EXT_DISPLAY);
+            if (cpList) cpList.innerHTML = '<div class="ikcp-empty">Sync failed.</div>';
+            if (brList) brList.innerHTML = '<div class="ikcp-empty">Sync failed.</div>';
         }
     }
 
-    function filterAndSort(items) {
-        const s = getSettings();
-        let filtered = items;
+    async function fetchDetailsBackground(charId, checkpoints, branches) {
+        const ctx = SillyTavern.getContext();
+        const charName = getCharacterName();
+        const charAvatar = getCharacterAvatar();
+        
+        const allItems = [...checkpoints, ...branches];
+        for (const item of allItems) {
+            try {
+                const getRes = await fetch('/api/chats/get', {
+                    method: 'POST',
+                    headers: ctx.getRequestHeaders(),
+                    body: JSON.stringify({
+                        ch_name: charName,
+                        file_name: item.fileName.replace('.jsonl', ''),
+                        avatar_url: charAvatar,
+                    }),
+                    cache: 'no-cache',
+                });
+                if (getRes.ok) {
+                    let chatData = await getRes.json();
+                    if (Array.isArray(chatData)) {
+                        chatData.shift();
+                        item.messageCount = chatData.length;
+                        let size = 0;
+                        for(let m of chatData) { if(m && m.mes && !m.is_system) size += m.mes.length; }
+                        item.contextSize = size;
+                        
+                        // Update UI if still on same character
+                        if (getCharacterId() === charId && _windowEl) {
+                            const card = _windowEl.querySelector(`[data-file="${CSS.escape(item.fileName)}"]`);
+                            if (card) {
+                                const msgBadge = card.querySelector('.ikcp-badge-msg-count');
+                                if (msgBadge) msgBadge.textContent = `${item.messageCount} msgs`;
+                                const ctxBadge = card.querySelector('.ikcp-badge-accent');
+                                if (ctxBadge) ctxBadge.textContent = formatContextSize(item.contextSize);
+                            }
+                        }
+                    }
+                }
+            } catch(e) {}
+        }
+    }
 
-        // Filter by search
+    // ── Rendering ───────────────────────────────────────────────
+
+    function renderFromCache() {
+        const charId = getCharacterId();
+        if (charId === undefined) {
+            clearLists('No character selected.');
+            return;
+        }
+
+        const data = _characterHubCache[charId];
+        if (!data) {
+            clearLists('Click Sync (top right) to scan character chats.');
+            return;
+        }
+
+        // Update counts
+        const cpCount = _windowEl.querySelector('[data-section="checkpoints"] .ikcp-section-count');
+        const brCount = _windowEl.querySelector('[data-section="branches"] .ikcp-section-count');
+        if (cpCount) cpCount.textContent = `(${data.checkpoints.length})`;
+        if (brCount) brCount.textContent = `(${data.branches.length})`;
+
+        renderList('checkpoints', data.checkpoints, 'fa-file-lines');
+        renderList('branches', data.branches, 'fa-code-branch');
+    }
+
+    function clearLists(msg) {
+        const cpList = _windowEl.querySelector('[data-list="checkpoints"]');
+        const brList = _windowEl.querySelector('[data-list="branches"]');
+        if (cpList) cpList.innerHTML = `<div class="ikcp-empty">${msg}</div>`;
+        if (brList) brList.innerHTML = `<div class="ikcp-empty">${msg}</div>`;
+        
+        const cpCount = _windowEl.querySelector('[data-section="checkpoints"] .ikcp-section-count');
+        const brCount = _windowEl.querySelector('[data-section="branches"] .ikcp-section-count');
+        if (cpCount) cpCount.textContent = `(0)`;
+        if (brCount) brCount.textContent = `(0)`;
+    }
+
+    function renderList(type, items, iconClass) {
+        const listEl = _windowEl.querySelector(`[data-list="${type}"]`);
+        if (!listEl) return;
+
+        let filtered = items;
         if (_currentFilter) {
             filtered = filtered.filter(item => {
-                const note = getNote(item.fileName).toLowerCase();
-                return item.name.toLowerCase().includes(_currentFilter) ||
-                       note.includes(_currentFilter);
+                const note = getSettings().notes[item.fileName] || '';
+                return item.name.toLowerCase().includes(_currentFilter) || note.toLowerCase().includes(_currentFilter);
             });
         }
 
-        // Sort
+        const s = getSettings();
         if (s.sortMode === 'name') {
             filtered.sort((a, b) => a.name.localeCompare(b.name));
         } else {
-            // Date sort — by message index descending (newest first)
-            filtered.sort((a, b) => b.messageIndex - a.messageIndex);
+            // Sort by sendDate descending, or messageIndex if dates match
+            filtered.sort((a, b) => {
+                const da = new Date(a.sendDate).getTime() || 0;
+                const db = new Date(b.sendDate).getTime() || 0;
+                if (da !== db) return db - da;
+                return b.messageIndex - a.messageIndex;
+            });
         }
 
-        return filtered;
+        if (filtered.length === 0) {
+            listEl.innerHTML = _currentFilter
+                ? `<div class="ikcp-empty">No ${type} match your search.</div>`
+                : `<div class="ikcp-empty">No ${type} found.</div>`;
+            return;
+        }
+
+        listEl.innerHTML = filtered.map(item => buildCardHTML(item, iconClass)).join('');
+        wireCardEvents(listEl);
     }
 
     function buildCardHTML(item, iconClass) {
-        const note = getNote(item.fileName);
+        const note = getSettings().notes[item.fileName] || '';
         const noteHasContent = note ? ' has-content' : '';
-        const cachedDetails = _detailsCache[item.fileName];
-        const msgCountText = cachedDetails ? `${cachedDetails.messageCount} msgs` : '…';
-        const ctxText = cachedDetails ? formatContextSize(cachedDetails.contextSize) : '…';
+        const msgCountText = item.messageCount !== undefined ? `${item.messageCount} msgs` : '…';
+        const ctxText = item.contextSize !== undefined ? formatContextSize(item.contextSize) : '…';
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            try {
+                const d = new Date(dateStr);
+                if (isNaN(d.getTime())) return dateStr.substring(0, 10);
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                const hours = String(d.getHours()).padStart(2, '0');
+                const mins = String(d.getMinutes()).padStart(2, '0');
+                return `${month}/${day} ${hours}:${mins}`;
+            } catch { return ''; }
+        }
 
         return `
-        <div class="ikcp-card" data-file="${escHtml(item.fileName)}" title="Click to navigate">
+        <div class="ikcp-card" data-file="${escHtml(item.fileName)}" title="Click to open ${escHtml(item.fileName)}">
             <div class="ikcp-card-top">
                 <span class="ikcp-card-icon"><i class="fa-solid ${iconClass}"></i></span>
                 <span class="ikcp-card-name">${escHtml(item.name)}</span>
             </div>
             <div class="ikcp-card-meta">
-                <span class="ikcp-badge">Msg #${item.messageIndex}</span>
                 <span class="ikcp-badge ikcp-badge-msg-count">${msgCountText}</span>
                 <span class="ikcp-badge ikcp-badge-accent">${ctxText}</span>
                 ${item.sendDate ? `<span class="ikcp-card-date">${escHtml(formatDate(item.sendDate))}</span>` : ''}
@@ -665,126 +569,57 @@
         </div>`;
     }
 
-    function formatDate(dateStr) {
-        if (!dateStr) return '';
-        try {
-            const d = new Date(dateStr);
-            if (isNaN(d.getTime())) return dateStr.substring(0, 10);
-            const month = String(d.getMonth() + 1).padStart(2, '0');
-            const day = String(d.getDate()).padStart(2, '0');
-            const hours = String(d.getHours()).padStart(2, '0');
-            const mins = String(d.getMinutes()).padStart(2, '0');
-            return `${month}/${day} ${hours}:${mins}`;
-        } catch {
-            return '';
-        }
-    }
-
-    function renderCheckpointList(checkpoints) {
-        if (!_windowEl) return;
-        const listEl = _windowEl.querySelector('[data-list="checkpoints"]');
-        if (!listEl) return;
-
-        const sorted = filterAndSort(checkpoints);
-
-        if (sorted.length === 0) {
-            listEl.innerHTML = _currentFilter
-                ? '<div class="ikcp-empty">No checkpoints match your search.</div>'
-                : '<div class="ikcp-empty">No checkpoints found in this chat.</div>';
-            return;
-        }
-
-        listEl.innerHTML = sorted.map(cp => buildCardHTML(cp, 'fa-file-lines')).join('');
-        wireCardEvents(listEl);
-    }
-
-    function renderBranchList(branches) {
-        if (!_windowEl) return;
-        const listEl = _windowEl.querySelector('[data-list="branches"]');
-        if (!listEl) return;
-
-        const sorted = filterAndSort(branches);
-
-        if (sorted.length === 0) {
-            listEl.innerHTML = _currentFilter
-                ? '<div class="ikcp-empty">No branches match your search.</div>'
-                : '<div class="ikcp-empty">No branches found in this chat.</div>';
-            return;
-        }
-
-        listEl.innerHTML = sorted.map(br => buildCardHTML(br, 'fa-code-branch')).join('');
-        wireCardEvents(listEl);
-    }
-
     function wireCardEvents(listEl) {
-        // Card click → navigate
         listEl.querySelectorAll('.ikcp-card').forEach(card => {
             card.addEventListener('click', (e) => {
-                // Don't navigate if clicking the note input
                 if (e.target.closest('.ikcp-note-input')) return;
                 const fileName = card.dataset.file;
                 if (fileName) navigateTo(fileName);
             });
         });
 
-        // Note input — save on blur and enter
         listEl.querySelectorAll('.ikcp-note-input').forEach(input => {
             input.addEventListener('click', (e) => e.stopPropagation());
             input.addEventListener('blur', () => {
                 const fileName = input.dataset.noteFile;
-                saveNote(fileName, input.value);
-                input.classList.toggle('has-content', !!input.value.trim());
+                const val = input.value.trim();
+                const s = getSettings();
+                if (val) s.notes[fileName] = val;
+                else delete s.notes[fileName];
+                saveSettings();
+                input.classList.toggle('has-content', !!val);
             });
             input.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    input.blur();
-                }
-                // Stop propagation so hotkeys don't fire
+                if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
                 e.stopPropagation();
             });
         });
     }
 
-
-    // ═══════════════════════════════════════════════════════════════
-    //  PART 4 — DRAG, RESIZE, HOTKEY, WAND
-    // ═══════════════════════════════════════════════════════════════
+    // ── Window Mechanics ────────────────────────────────────────
 
     function setupDrag(win) {
         const header = win.querySelector('.ikcp-header');
         if (!header) return;
-
         let isDragging = false;
         let startX, startY, startLeft, startTop;
 
         header.addEventListener('mousedown', (e) => {
-            // Don't drag from buttons
             if (e.target.closest('.ikcp-hbtn')) return;
             isDragging = true;
             win.classList.add('ikcp-dragging');
-
             const rect = win.getBoundingClientRect();
-            startX = e.clientX;
-            startY = e.clientY;
-            startLeft = rect.left;
-            startTop = rect.top;
-
+            startX = e.clientX; startY = e.clientY;
+            startLeft = rect.left; startTop = rect.top;
             e.preventDefault();
         });
 
         document.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
-
-            let newLeft = startLeft + dx;
-            let newTop = startTop + dy;
-
-            // Keep within viewport bounds
+            let newLeft = startLeft + (e.clientX - startX);
+            let newTop = startTop + (e.clientY - startY);
             newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - 60));
             newTop = Math.max(0, Math.min(newTop, window.innerHeight - 40));
-
             win.style.left = newLeft + 'px';
             win.style.top = newTop + 'px';
             win.style.right = 'auto';
@@ -794,8 +629,6 @@
             if (!isDragging) return;
             isDragging = false;
             win.classList.remove('ikcp-dragging');
-
-            // Save position
             const s = getSettings();
             s.windowX = parseInt(win.style.left, 10);
             s.windowY = parseInt(win.style.top, 10);
@@ -806,66 +639,37 @@
     function setupResize(win) {
         const handles = win.querySelectorAll('.ikcp-rh');
         if (!handles.length) return;
-
-        let isResizing = false;
-        let resizeDir = '';
-        let startX, startY, startW, startH, startLeft, startTop;
+        let isResizing = false, resizeDir = '', startX, startY, startW, startH, startLeft, startTop;
 
         handles.forEach(handle => {
             handle.addEventListener('mousedown', (e) => {
                 isResizing = true;
                 resizeDir = handle.dataset.dir;
                 win.classList.add('ikcp-resizing');
-
                 const rect = win.getBoundingClientRect();
-                startX = e.clientX;
-                startY = e.clientY;
-                startW = rect.width;
-                startH = rect.height;
-                startLeft = rect.left;
-                startTop = rect.top;
-
-                e.preventDefault();
-                e.stopPropagation();
+                startX = e.clientX; startY = e.clientY;
+                startW = rect.width; startH = rect.height;
+                startLeft = rect.left; startTop = rect.top;
+                e.preventDefault(); e.stopPropagation();
             });
         });
 
         document.addEventListener('mousemove', (e) => {
             if (!isResizing) return;
-            const dx = e.clientX - startX;
-            const dy = e.clientY - startY;
-            const dir = resizeDir;
-            const minW = 320;
-            const minH = 280;
+            const dx = e.clientX - startX, dy = e.clientY - startY;
+            const dir = resizeDir, minW = 320, minH = 280;
+            let newW = startW, newH = startH, newLeft = startLeft, newTop = startTop;
 
-            let newW = startW;
-            let newH = startH;
-            let newLeft = startLeft;
-            let newTop = startTop;
-
-            // East
             if (dir.includes('e')) newW = Math.max(minW, startW + dx);
-            // West
-            if (dir.includes('w')) {
-                newW = Math.max(minW, startW - dx);
-                if (newW > minW) newLeft = startLeft + dx;
-            }
-            // South
+            if (dir.includes('w')) { newW = Math.max(minW, startW - dx); if (newW > minW) newLeft = startLeft + dx; }
             if (dir.includes('s')) newH = Math.max(minH, startH + dy);
-            // North
             if (dir.includes('n') && dir !== 'ne' || dir === 'n' || dir === 'nw') {
-                newH = Math.max(minH, startH - dy);
-                if (newH > minH) newTop = startTop + dy;
+                newH = Math.max(minH, startH - dy); if (newH > minH) newTop = startTop + dy;
             }
-            if (dir === 'ne') {
-                newH = Math.max(minH, startH - dy);
-                if (newH > minH) newTop = startTop + dy;
-            }
+            if (dir === 'ne') { newH = Math.max(minH, startH - dy); if (newH > minH) newTop = startTop + dy; }
 
-            win.style.width = newW + 'px';
-            win.style.height = newH + 'px';
-            win.style.left = newLeft + 'px';
-            win.style.top = newTop + 'px';
+            win.style.width = newW + 'px'; win.style.height = newH + 'px';
+            win.style.left = newLeft + 'px'; win.style.top = newTop + 'px';
             win.style.right = 'auto';
         });
 
@@ -873,13 +677,9 @@
             if (!isResizing) return;
             isResizing = false;
             win.classList.remove('ikcp-resizing');
-
-            // Save size + position
             const s = getSettings();
-            s.windowW = parseInt(win.style.width, 10);
-            s.windowH = parseInt(win.style.height, 10);
-            s.windowX = parseInt(win.style.left, 10);
-            s.windowY = parseInt(win.style.top, 10);
+            s.windowW = parseInt(win.style.width, 10); s.windowH = parseInt(win.style.height, 10);
+            s.windowX = parseInt(win.style.left, 10);  s.windowY = parseInt(win.style.top, 10);
             saveSettings();
         });
     }
@@ -889,23 +689,26 @@
             const s = getSettings();
             if (!s.enabled || !s.hotkeyEnabled || !s.hotkey) return;
 
-            // Don't trigger if typing in an input
             const tag = (e.target.tagName || '').toLowerCase();
             if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
 
-            // Parse hotkey string like "Alt+K", "Ctrl+Shift+B"
             const parts = s.hotkey.split('+').map(p => p.trim().toLowerCase());
-            const key = parts.pop(); // last part is the actual key
-            const needCtrl = parts.includes('ctrl') || parts.includes('control');
-            const needAlt = parts.includes('alt');
-            const needShift = parts.includes('shift');
-            const needMeta = parts.includes('meta') || parts.includes('cmd');
-
-            if (e.ctrlKey !== needCtrl) return;
-            if (e.altKey !== needAlt) return;
-            if (e.shiftKey !== needShift) return;
-            if (e.metaKey !== needMeta) return;
-            if (e.key.toLowerCase() !== key) return;
+            const key = parts.pop(); 
+            
+            // Handle space, modifiers etc. (e.key can be ' ' or 'k', 'K')
+            const eventKeyLower = e.key.toLowerCase();
+            
+            // To handle something like Alt+K, we check e.altKey && e.key.toLowerCase() === 'k'
+            if (e.ctrlKey !== (parts.includes('ctrl') || parts.includes('control'))) return;
+            if (e.altKey !== parts.includes('alt')) return;
+            if (e.shiftKey !== parts.includes('shift')) return;
+            if (e.metaKey !== (parts.includes('meta') || parts.includes('cmd'))) return;
+            
+            // Handle edge cases for keys
+            let mappedKey = key;
+            if (mappedKey === 'space') mappedKey = ' ';
+            
+            if (eventKeyLower !== mappedKey) return;
 
             e.preventDefault();
             e.stopPropagation();
@@ -916,25 +719,17 @@
     function addWandButton() {
         const menu = document.getElementById('extensionsMenu');
         if (!menu || document.getElementById('ikcp-wand-btn')) return;
-
         const btn = document.createElement('div');
         btn.id = 'ikcp-wand-btn';
         btn.classList.add('list-group-item', 'flex-container', 'flexGap5');
-        btn.innerHTML = '<div class="fa-solid fa-bookmark extensionsMenuExtensionButton"></div><span>Ikarus Checkpoint</span>';
-        btn.addEventListener('click', () => {
-            toggleWindow();
-        });
+        btn.innerHTML = '<div class="fa-solid fa-bookmark extensionsMenuExtensionButton"></div><span>Ikarus Hub</span>';
+        btn.addEventListener('click', toggleWindow);
         menu.appendChild(btn);
     }
 
-
-    // ── Bootstrap ────────────────────────────────────────────────
     jQuery(async () => {
-        try {
-            await init();
-        } catch (e) {
-            console.error(`[${EXT_DISPLAY}] Init failed:`, e);
-        }
+        try { await init(); } 
+        catch (e) { console.error(`[${EXT_DISPLAY}] Init failed:`, e); }
     });
 
 })();
