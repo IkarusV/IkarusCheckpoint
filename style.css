@@ -1,0 +1,530 @@
+/* ═══════════════════════════════════════════════════════════════
+   IKARUS CHECKPOINT — style.css
+   Floating checkpoint/branch navigator for SillyTavern
+   Accent: Warm amber/gold
+═══════════════════════════════════════════════════════════════ */
+
+/* ── CSS Variables ───────────────────────────────────────────── */
+
+.ikcp-window {
+    --ikcp-bg:          rgba(16, 14, 12, 0.94);
+    --ikcp-blur:        blur(14px);
+    --ikcp-border:      1px solid rgba(240, 160, 64, 0.12);
+    --ikcp-shadow:      0 20px 60px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+    --ikcp-text:        #e8e4de;
+    --ikcp-text-muted:  #8a8070;
+    --ikcp-accent:      #f0a040;
+    --ikcp-accent-dim:  rgba(240, 160, 64, 0.40);
+    --ikcp-accent-bg:   rgba(240, 160, 64, 0.10);
+    --ikcp-header-bg:   rgba(240, 160, 64, 0.05);
+    --ikcp-card-bg:     rgba(255, 255, 255, 0.03);
+    --ikcp-card-hover:  rgba(240, 160, 64, 0.08);
+    --ikcp-input-bg:    rgba(0, 0, 0, 0.30);
+    --ikcp-radius:      10px;
+    --ikcp-danger:      #e05050;
+    --ikcp-success:     #4caf7d;
+}
+
+/* ── Base Window ─────────────────────────────────────────────── */
+
+.ikcp-window {
+    position: fixed;
+    top: 80px;
+    right: 24px;
+    width: 380px;
+    height: 520px;
+    min-width: 320px;
+    min-height: 280px;
+    max-height: 90vh;
+    background: var(--ikcp-bg);
+    backdrop-filter: var(--ikcp-blur);
+    -webkit-backdrop-filter: var(--ikcp-blur);
+    border: var(--ikcp-border);
+    border-radius: var(--ikcp-radius);
+    box-shadow: var(--ikcp-shadow);
+    display: flex;
+    flex-direction: column;
+    z-index: 9900;
+    overflow: hidden;
+    color: var(--ikcp-text);
+    font-family: var(--mainFontFamily, 'Segoe UI', system-ui, sans-serif);
+    font-size: 13px;
+    line-height: 1.5;
+    transition: opacity 0.2s;
+    animation: ikcp-slide-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes ikcp-slide-in {
+    from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.ikcp-window.ikcp-dragging,
+.ikcp-window.ikcp-resizing {
+    will-change: left, top, width, height;
+    transition: none;
+    user-select: none;
+}
+.ikcp-window.ikcp-dragging { cursor: grabbing; }
+.ikcp-window.ikcp-dragging * { pointer-events: none; }
+.ikcp-window.ikcp-resizing * { pointer-events: none; }
+
+.ikcp-window *::-webkit-scrollbar { width: 5px; height: 5px; }
+.ikcp-window *::-webkit-scrollbar-track { background: transparent; }
+.ikcp-window *::-webkit-scrollbar-thumb { background: var(--ikcp-text-muted); border-radius: 3px; }
+.ikcp-window *::-webkit-scrollbar-corner { background: transparent; }
+
+/* ── Resize Handles ──────────────────────────────────────────── */
+
+.ikcp-rh { position: absolute; z-index: 10; }
+.ikcp-rh-n  { top:0; left:8px; right:8px; height:4px; cursor:n-resize; }
+.ikcp-rh-s  { bottom:0; left:8px; right:8px; height:4px; cursor:s-resize; }
+.ikcp-rh-e  { right:0; top:8px; bottom:8px; width:4px; cursor:e-resize; }
+.ikcp-rh-w  { left:0; top:8px; bottom:8px; width:4px; cursor:w-resize; }
+.ikcp-rh-ne { top:0; right:0; width:10px; height:10px; cursor:ne-resize; }
+.ikcp-rh-se { bottom:0; right:0; width:10px; height:10px; cursor:se-resize; }
+.ikcp-rh-sw { bottom:0; left:0; width:10px; height:10px; cursor:sw-resize; }
+.ikcp-rh-nw { top:0; left:0; width:10px; height:10px; cursor:nw-resize; }
+
+/* ── Header ──────────────────────────────────────────────────── */
+
+.ikcp-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px 10px 14px;
+    background: var(--ikcp-header-bg);
+    border-bottom: var(--ikcp-border);
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+    gap: 8px;
+}
+.ikcp-header:active { cursor: grabbing; }
+
+.ikcp-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ikcp-logo {
+    display: flex;
+    align-items: center;
+    color: var(--ikcp-accent);
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.ikcp-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ikcp-text);
+    flex-shrink: 0;
+}
+
+.ikcp-char-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 20px;
+    background: var(--ikcp-accent-bg);
+    color: var(--ikcp-accent);
+    border: 1px solid var(--ikcp-accent-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+}
+
+.ikcp-header-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.ikcp-hbtn {
+    background: none;
+    border: none;
+    color: var(--ikcp-text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 5px;
+    transition: color 0.15s, background 0.15s;
+    padding: 0;
+    font-size: 13px;
+}
+.ikcp-hbtn:hover { color: var(--ikcp-text); background: rgba(255,255,255,0.07); }
+.ikcp-hbtn-close:hover { color: var(--ikcp-danger); background: rgba(224,80,80,0.1); }
+
+/* ── Content Area ────────────────────────────────────────────── */
+
+.ikcp-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Section (Checkpoints / Branches) ────────────────────────── */
+
+.ikcp-section {
+    display: flex;
+    flex-direction: column;
+}
+
+.ikcp-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: rgba(0, 0, 0, 0.15);
+    border-bottom: var(--ikcp-border);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+    flex-shrink: 0;
+}
+.ikcp-section-header:hover { background: rgba(0, 0, 0, 0.25); }
+
+.ikcp-section-chevron {
+    color: var(--ikcp-text-muted);
+    font-size: 10px;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+.ikcp-section-header.collapsed .ikcp-section-chevron {
+    transform: rotate(-90deg);
+}
+
+.ikcp-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ikcp-text);
+    flex: 1;
+}
+
+.ikcp-section-count {
+    font-size: 10px;
+    color: var(--ikcp-accent);
+    background: var(--ikcp-accent-bg);
+    padding: 1px 7px;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.ikcp-section-action {
+    background: none;
+    border: 1px solid var(--ikcp-accent-dim);
+    color: var(--ikcp-accent);
+    cursor: pointer;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: all 0.15s;
+    font-family: inherit;
+    flex-shrink: 0;
+}
+.ikcp-section-action:hover {
+    background: var(--ikcp-accent);
+    color: #fff;
+    border-color: var(--ikcp-accent);
+}
+
+.ikcp-section-body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+}
+.ikcp-section-header.collapsed + .ikcp-section-body {
+    max-height: 0 !important;
+    overflow: hidden;
+}
+
+/* ── Search Bar ──────────────────────────────────────────────── */
+
+.ikcp-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    flex-shrink: 0;
+}
+
+.ikcp-search-input {
+    flex: 1;
+    background: var(--ikcp-input-bg);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 5px;
+    color: var(--ikcp-text);
+    font-family: inherit;
+    font-size: 11px;
+    padding: 4px 8px;
+    outline: none;
+    transition: border-color 0.15s;
+}
+.ikcp-search-input:focus { border-color: var(--ikcp-accent-dim); }
+.ikcp-search-input::placeholder { color: var(--ikcp-text-muted); font-style: italic; }
+
+.ikcp-sort-btn {
+    background: none;
+    border: 1px solid rgba(255,255,255,0.08);
+    color: var(--ikcp-text-muted);
+    cursor: pointer;
+    font-size: 10px;
+    padding: 3px 7px;
+    border-radius: 4px;
+    transition: all 0.15s;
+    font-family: inherit;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.ikcp-sort-btn:hover {
+    color: var(--ikcp-accent);
+    border-color: var(--ikcp-accent-dim);
+    background: var(--ikcp-accent-bg);
+}
+
+/* ── Card List ───────────────────────────────────────────────── */
+
+.ikcp-card-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 10px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.ikcp-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    background: var(--ikcp-card-bg);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    position: relative;
+}
+.ikcp-card:hover {
+    background: var(--ikcp-card-hover);
+    border-color: var(--ikcp-accent-dim);
+    box-shadow: 0 0 12px rgba(240, 160, 64, 0.06);
+}
+
+.ikcp-card-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ikcp-card-icon {
+    color: var(--ikcp-accent);
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.ikcp-card-name {
+    flex: 1;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ikcp-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.ikcp-card-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.ikcp-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.06);
+    color: var(--ikcp-text-muted);
+    white-space: nowrap;
+}
+.ikcp-badge-accent {
+    background: var(--ikcp-accent-bg);
+    color: var(--ikcp-accent);
+}
+
+.ikcp-card-date {
+    font-size: 10px;
+    color: var(--ikcp-text-muted);
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+/* ── Note Field ──────────────────────────────────────────────── */
+
+.ikcp-note-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.ikcp-note-icon {
+    color: var(--ikcp-text-muted);
+    font-size: 10px;
+    margin-top: 3px;
+    flex-shrink: 0;
+}
+
+.ikcp-note-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    color: var(--ikcp-text-muted);
+    font-family: inherit;
+    font-size: 11px;
+    font-style: italic;
+    padding: 2px 4px;
+    outline: none;
+    transition: border-color 0.15s, color 0.15s;
+    resize: none;
+    min-height: 18px;
+    max-height: 60px;
+    overflow-y: auto;
+}
+.ikcp-note-input:focus {
+    border-color: var(--ikcp-accent-dim);
+    color: var(--ikcp-text);
+    font-style: normal;
+}
+.ikcp-note-input::placeholder { color: rgba(138,128,112,0.5); }
+.ikcp-note-input.has-content { font-style: normal; color: var(--ikcp-text); }
+
+/* ── Empty State ─────────────────────────────────────────────── */
+
+.ikcp-empty {
+    padding: 20px 14px;
+    text-align: center;
+    color: var(--ikcp-text-muted);
+    font-size: 12px;
+    font-style: italic;
+}
+
+/* ── Footer / Back to Main ───────────────────────────────────── */
+
+.ikcp-footer {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    border-top: var(--ikcp-border);
+    background: rgba(0,0,0,0.15);
+    display: flex;
+    gap: 6px;
+}
+
+.ikcp-footer-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--ikcp-accent-bg);
+    border: 1px solid var(--ikcp-accent-dim);
+    color: var(--ikcp-accent);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+    font-family: inherit;
+    font-weight: 600;
+    transition: all 0.15s;
+}
+.ikcp-footer-btn:hover {
+    background: var(--ikcp-accent);
+    color: #fff;
+    border-color: var(--ikcp-accent);
+    box-shadow: 0 0 16px rgba(240,160,64,0.15);
+}
+
+/* ── Dock Icon ───────────────────────────────────────────────── */
+
+.ikcp-dock-icon {
+    position: fixed;
+    bottom: 80px;
+    right: 20px;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: var(--ikcp-accent-bg, rgba(240,160,64,0.10));
+    border: 1px solid var(--ikcp-accent-dim, rgba(240,160,64,0.40));
+    color: var(--ikcp-accent, #f0a040);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9800;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    transition: all 0.2s;
+    font-size: 16px;
+    animation: ikcp-dock-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ikcp-dock-icon:hover {
+    background: var(--ikcp-accent, #f0a040);
+    color: #fff;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 0 16px rgba(240,160,64,0.2);
+    transform: scale(1.08);
+}
+
+@keyframes ikcp-dock-pop {
+    from { transform: scale(0.4); opacity: 0; }
+    to   { transform: scale(1); opacity: 1; }
+}
+
+/* ── Loading Spinner ─────────────────────────────────────────── */
+
+.ikcp-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px;
+    color: var(--ikcp-text-muted);
+    font-size: 12px;
+}
+
+.ikcp-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--ikcp-accent-dim);
+    border-top-color: var(--ikcp-accent);
+    border-radius: 50%;
+    animation: ikcp-spin 0.7s linear infinite;
+}
+
+@keyframes ikcp-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Settings Panel ──────────────────────────────────────────── */
+
+.ikcp-settings .ikcp-settings-section {
+    padding: 6px 0;
+}
