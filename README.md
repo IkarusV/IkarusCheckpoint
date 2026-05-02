@@ -1,6 +1,6 @@
 # Ikarus Hub
 
-A lightweight, game-save-inspired floating checkpoint and branch manager for [SillyTavern](https://github.com/SillyTavern/SillyTavern).
+A lightweight, game-save-inspired floating checkpoint and branch manager for [SillyTavern](https://github.com/SillyTavern/SillyTavern). The general interface and UI glass panel is from [ST-Copilot](https://github.com/Supker/ST-Copilot), a floating assistant extensions.
 
 ## Features
 
