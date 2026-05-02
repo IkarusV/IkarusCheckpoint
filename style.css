@@ -542,7 +542,11 @@
     }
     
     .ikcp-dock-icon {
-        bottom: max(100px, calc(env(safe-area-inset-bottom, 0px) + 80px));
+        bottom: max(140px, calc(env(safe-area-inset-bottom, 0px) + 120px));
         right: max(14px, env(safe-area-inset-right, 14px));
+        z-index: 9990;
+        width: 46px;
+        height: 46px;
+        font-size: 18px;
     }
 }

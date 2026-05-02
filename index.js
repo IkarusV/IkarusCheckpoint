@@ -93,6 +93,15 @@
             es.on(et.CHAT_CHANGED, onChatChanged);
         }
         console.log(`[${EXT_DISPLAY}] Hub Initialized.`);
+
+        // Initial check: if a character is already loaded when extension initializes
+        // (important for mobile where CHAT_CHANGED may fire before extension loads)
+        setTimeout(() => {
+            const charId = getCharacterId();
+            if (charId !== undefined && !_characterHubCache[charId]) {
+                syncAllCharacterChats();
+            }
+        }, 800);
     }
 
     function loadSettingsUI() {
@@ -372,8 +381,10 @@
             return;
         }
 
-        const cpList = _windowEl.querySelector('[data-list="checkpoints"]');
-        const brList = _windowEl.querySelector('[data-list="branches"]');
+        toastr?.info(`Scanning chats for ${charName}...`, EXT_DISPLAY);
+
+        const cpList = _windowEl?.querySelector('[data-list="checkpoints"]');
+        const brList = _windowEl?.querySelector('[data-list="branches"]');
         if (cpList) cpList.innerHTML = '<div class="ikcp-loading"><div class="ikcp-spinner"></div>Syncing all chats...</div>';
         if (brList) brList.innerHTML = '<div class="ikcp-loading"><div class="ikcp-spinner"></div>Syncing all chats...</div>';
 
@@ -460,6 +471,12 @@
                 branches: allBranches
             };
 
+            const totalChats = chatFiles.length;
+            toastr?.success(
+                `${charName} scan complete! ${totalChats} chat${totalChats !== 1 ? 's' : ''} · ${allCheckpoints.length} checkpoint${allCheckpoints.length !== 1 ? 's' : ''} · ${allBranches.length} branch${allBranches.length !== 1 ? 'es' : ''}`,
+                EXT_DISPLAY
+            );
+
             // Re-render
             renderFromCache();
 
@@ -520,6 +537,7 @@
     // ── Rendering ───────────────────────────────────────────────
 
     function renderFromCache() {
+        if (!_windowEl) return;
         const charId = getCharacterId();
         if (charId === undefined) {
             clearLists('No character selected.');
