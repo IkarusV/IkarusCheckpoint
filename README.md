@@ -17,6 +17,9 @@ A lightweight, game-save-inspired floating checkpoint and branch manager for [Si
 
 <img width="900" height="1244" alt="image" src="https://github.com/user-attachments/assets/2d022685-d9dd-40f8-9a65-ecba523f2dc1" />
 
+<img width="652" height="354" alt="image" src="https://github.com/user-attachments/assets/8e695ca0-b0ef-4ab6-8380-5a3be3e5c948" />
+
+
 
 
 ## Installation
