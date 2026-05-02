@@ -129,8 +129,13 @@
             const badge = _windowEl.querySelector('.ikcp-char-badge');
             if (badge) badge.textContent = getCharacterName() || '—';
         }
-        if (_isOpen) {
-            // Render from cache for this character. If empty, it will show empty state or prompt to scan.
+        
+        const charId = getCharacterId();
+        if (charId !== undefined && !_characterHubCache[charId]) {
+            // Auto-sync if cache is completely empty for this character (first load or switch)
+            syncAllCharacterChats();
+        } else if (_isOpen) {
+            // Render from cache for this character
             renderFromCache();
         }
     }
