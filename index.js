@@ -281,6 +281,15 @@
         if (!s.enabled || !_windowEl) return;
         _windowEl.style.display = 'flex';
         _isOpen = true;
+
+        // On mobile, force window above all ST panels and into visible area
+        if (isMobile()) {
+            _windowEl.style.zIndex = '10001';
+            _windowEl.style.left = '3vw';
+            _windowEl.style.top = '8vh';
+            _windowEl.style.right = 'auto';
+        }
+
         const badge = _windowEl.querySelector('.ikcp-char-badge');
         if (badge) badge.textContent = getCharacterName() || '—';
         renderFromCache();

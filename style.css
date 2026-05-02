@@ -539,6 +539,7 @@
         top: 8vh !important;
         min-width: unset !important;
         max-width: calc(100vw - 10px) !important;
+        z-index: 10001 !important;
     }
     
     .ikcp-dock-icon {
