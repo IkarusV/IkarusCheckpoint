@@ -404,6 +404,7 @@
             let allBranches = [];
             let seenBranches = new Set();
             let seenCheckpoints = new Set();
+            let chatFileMetadata = {};
 
             // 2. Fetch each chat and scan
             for (const file_name of chatFiles) {
@@ -463,6 +464,31 @@
                         }
                     }
                 }
+
+                // Collect metadata for this chat file
+                const lastMsg = chatData[chatData.length - 1];
+                chatFileMetadata[file_name] = {
+                    messageCount: chatData.length,
+                    contextSize: totalContext,
+                    lastDate: lastMsg?.send_date || '',
+                };
+            }
+
+            // 3. Chat files with "Branch" in the name are branches (active timelines)
+            for (const file_name of chatFiles) {
+                if (/branch/i.test(file_name) && !seenCheckpoints.has(file_name) && !seenBranches.has(file_name)) {
+                    seenBranches.add(file_name);
+                    const meta = chatFileMetadata[file_name] || {};
+                    allBranches.push({
+                        fileName: file_name,
+                        sourceChat: file_name,
+                        messageIndex: 0,
+                        name: file_name,
+                        sendDate: meta.lastDate || '',
+                        messageCount: meta.messageCount,
+                        contextSize: meta.contextSize,
+                    });
+                }
             }
 
             // Save to cache
@@ -474,7 +500,8 @@
             const totalChats = chatFiles.length;
             toastr?.success(
                 `${charName} scan complete! ${totalChats} chat${totalChats !== 1 ? 's' : ''} · ${allCheckpoints.length} checkpoint${allCheckpoints.length !== 1 ? 's' : ''} · ${allBranches.length} branch${allBranches.length !== 1 ? 'es' : ''}`,
-                EXT_DISPLAY
+                EXT_DISPLAY,
+                { timeOut: 6000 }
             );
 
             // Re-render
