@@ -32,8 +32,8 @@
         const defaults = {
             enabled: true,
             showDock: true,
-            hotkeyEnabled: true,
-            hotkey: 'Alt+k', // lowercase for easier matching
+            enabled: true,
+            showDock: true,
             windowX: null, windowY: null,
             windowW: 380, windowH: 520,
             notes: {},
@@ -83,7 +83,6 @@
 
         injectUI();
         addWandButton();
-        setupHotkey();
         updateDockVisibility();
 
         // When chat changes, we don't automatically rescan all chats (too slow).
@@ -106,16 +105,7 @@
         };
         bindCheck('ikcp-enabled', 'enabled', updateDockVisibility);
         bindCheck('ikcp-show-dock', 'showDock', updateDockVisibility);
-        bindCheck('ikcp-hotkey-enabled', 'hotkeyEnabled');
 
-        const elHotkey = document.getElementById('ikcp-hotkey');
-        if (elHotkey) {
-            elHotkey.value = s.hotkey;
-            elHotkey.addEventListener('change', () => {
-                s.hotkey = elHotkey.value.trim() || 'Alt+k';
-                saveSettings();
-            });
-        }
         document.getElementById('ikcp-open-window')?.addEventListener('click', () => showWindow());
     }
 
@@ -306,6 +296,71 @@
         }
     }
 
+    async function duplicateAndOpenChat(baseFileName) {
+        const ctx = SillyTavern.getContext();
+        const charName = getCharacterName();
+        const charAvatar = getCharacterAvatar();
+        
+        try {
+            // 1. Fetch original chat
+            const getRes = await fetch('/api/chats/get', {
+                method: 'POST',
+                headers: ctx.getRequestHeaders(),
+                body: JSON.stringify({
+                    ch_name: charName,
+                    file_name: baseFileName.replace('.jsonl', ''),
+                    avatar_url: charAvatar,
+                }),
+                cache: 'no-cache',
+            });
+            if (!getRes.ok) throw new Error('Failed to fetch checkpoint chat.');
+            const chatData = await getRes.json();
+            
+            // 2. Determine new unique name
+            const listRes = await fetch('/api/characters/chats', {
+                method: 'POST',
+                body: JSON.stringify({ avatar_url: charAvatar }),
+                headers: ctx.getRequestHeaders(),
+            });
+            let existingFiles = [];
+            if (listRes.ok) {
+                const chatDict = await listRes.json();
+                existingFiles = Object.values(chatDict).map(c => c.file_name.replace('.jsonl', ''));
+            }
+            
+            let cleanBase = baseFileName.replace('.jsonl', '');
+            let newName = cleanBase;
+            let counter = 1;
+            while (existingFiles.includes(newName)) {
+                newName = `${cleanBase}(${counter})`;
+                counter++;
+            }
+            
+            // 3. Save as new chat
+            const saveRes = await fetch('/api/chats/save', {
+                method: 'POST',
+                headers: ctx.getRequestHeaders(),
+                body: JSON.stringify({
+                    ch_name: charName,
+                    file_name: newName,
+                    chat: chatData
+                })
+            });
+            if (!saveRes.ok) throw new Error('Failed to create new branch.');
+            
+            // 4. Navigate to new chat
+            await ctx.openCharacterChat(newName);
+            toastr?.success(`Restored checkpoint to: ${newName}`, EXT_DISPLAY);
+            
+            // 5. Sync hub to show new branch
+            syncAllCharacterChats();
+            
+        } catch (e) {
+            console.error(`[${EXT_DISPLAY}] Restore failed:`, e);
+            if (typeof toastr !== 'undefined') toastr.error(`Failed to restore checkpoint: ${e.message}`, EXT_DISPLAY);
+        }
+    }
+
     // ── Data Syncing ────────────────────────────────────────────
 
     async function syncAllCharacterChats() {
@@ -483,8 +538,8 @@
         if (cpCount) cpCount.textContent = `(${data.checkpoints.length})`;
         if (brCount) brCount.textContent = `(${data.branches.length})`;
 
-        renderList('checkpoints', data.checkpoints, 'fa-file-lines');
-        renderList('branches', data.branches, 'fa-code-branch');
+        renderList('checkpoints', data.checkpoints, 'fa-file-lines', 'checkpoints');
+        renderList('branches', data.branches, 'fa-code-branch', 'branches');
     }
 
     function clearLists(msg) {
@@ -499,7 +554,7 @@
         if (brCount) brCount.textContent = `(0)`;
     }
 
-    function renderList(type, items, iconClass) {
+    function renderList(type, items, iconClass, itemType) {
         const listEl = _windowEl.querySelector(`[data-list="${type}"]`);
         if (!listEl) return;
 
@@ -531,11 +586,11 @@
             return;
         }
 
-        listEl.innerHTML = filtered.map(item => buildCardHTML(item, iconClass)).join('');
+        listEl.innerHTML = filtered.map(item => buildCardHTML(item, iconClass, itemType)).join('');
         wireCardEvents(listEl);
     }
 
-    function buildCardHTML(item, iconClass) {
+    function buildCardHTML(item, iconClass, itemType) {
         const note = getSettings().notes[item.fileName] || '';
         const noteHasContent = note ? ' has-content' : '';
         const msgCountText = item.messageCount !== undefined ? `${item.messageCount} msgs` : '…';
@@ -555,7 +610,7 @@
         }
 
         return `
-        <div class="ikcp-card" data-file="${escHtml(item.fileName)}" title="Click to open ${escHtml(item.fileName)}">
+        <div class="ikcp-card" data-file="${escHtml(item.fileName)}" data-type="${escHtml(itemType)}" title="Click to open ${escHtml(item.fileName)}">
             <div class="ikcp-card-top">
                 <span class="ikcp-card-icon"><i class="fa-solid ${iconClass}"></i></span>
                 <span class="ikcp-card-name">${escHtml(item.name)}</span>
@@ -579,7 +634,14 @@
             card.addEventListener('click', (e) => {
                 if (e.target.closest('.ikcp-note-input')) return;
                 const fileName = card.dataset.file;
-                if (fileName) navigateTo(fileName);
+                const itemType = card.dataset.type;
+                if (fileName) {
+                    if (itemType === 'checkpoints') {
+                        duplicateAndOpenChat(fileName);
+                    } else {
+                        navigateTo(fileName);
+                    }
+                }
             });
         });
 
@@ -689,37 +751,7 @@
         });
     }
 
-    function setupHotkey() {
-        document.addEventListener('keydown', (e) => {
-            const s = getSettings();
-            if (!s.enabled || !s.hotkeyEnabled || !s.hotkey) return;
 
-            const tag = (e.target.tagName || '').toLowerCase();
-            if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
-
-            const parts = s.hotkey.split('+').map(p => p.trim().toLowerCase());
-            const key = parts.pop(); 
-            
-            // Handle space, modifiers etc. (e.key can be ' ' or 'k', 'K')
-            const eventKeyLower = e.key.toLowerCase();
-            
-            // To handle something like Alt+K, we check e.altKey && e.key.toLowerCase() === 'k'
-            if (e.ctrlKey !== (parts.includes('ctrl') || parts.includes('control'))) return;
-            if (e.altKey !== parts.includes('alt')) return;
-            if (e.shiftKey !== parts.includes('shift')) return;
-            if (e.metaKey !== (parts.includes('meta') || parts.includes('cmd'))) return;
-            
-            // Handle edge cases for keys
-            let mappedKey = key;
-            if (mappedKey === 'space') mappedKey = ' ';
-            
-            if (eventKeyLower !== mappedKey) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-            toggleWindow();
-        });
-    }
 
     function addWandButton() {
         const menu = document.getElementById('extensionsMenu');
