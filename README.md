@@ -1,21 +1,18 @@
-# Ikarus Checkpoint
+# Ikarus Hub
 
-A lightweight, game-save-inspired floating checkpoint/branch navigator for [SillyTavern](https://github.com/SillyTavern/SillyTavern).
+A lightweight, game-save-inspired floating checkpoint and branch manager for [SillyTavern](https://github.com/SillyTavern/SillyTavern).
 
 ## Features
 
-- **Floating Window** — Draggable, resizable glassmorphic panel with warm amber/gold accents
-- **Checkpoint Scanner** — Automatically detects all bookmarks/checkpoints in your current chat
-- **Branch Navigator** — Lists all chat branches for easy switching
-- **One-Click Navigation** — Jump to any checkpoint or branch instantly
-- **Quick Checkpoint** — Create new checkpoints directly from the panel
-- **User Notes** — Add personal notes to any checkpoint (persisted across sessions)
-- **Search & Sort** — Filter by name or note, sort by date or alphabetically
-- **Context Estimates** — Shows message count and approximate context size per checkpoint
-- **Keyboard Shortcut** — Configurable hotkey (default: `Alt+K`) to toggle the window
-- **Wand Menu** — Accessible from SillyTavern's extensions wand menu
-- **Dock Icon** — Optional floating button for quick access
-- **Back to Main** — One-click return to the main chat when inside a checkpoint
+- **Character-Level Hub** — Acts as a master "Save File" manager for your character. It aggregates all checkpoints and branches across a character's *entire* chat history, not just the active chat.
+- **Save State Restoration** — Clicking a checkpoint acts like loading a game save: it automatically creates a fresh duplicate branch from the checkpoint so you can continue the story without permanently modifying the original checkpoint file.
+- **Auto-Sync & Caching** — Automatically syncs your checkpoints in the background the first time you switch to a character. It caches the data to prevent UI lag and layout thrashing as you navigate between chats.
+- **Manual Sync** — Click the Sync (🔄) button in the header at any time to explicitly rescan all the character's chat files for new bookmarks and branches.
+- **Floating Window** — Draggable, resizable glassmorphic panel with warm amber/gold accents.
+- **User Notes** — Add personal notes to any checkpoint or branch (persisted across sessions).
+- **Search & Sort** — Filter by name or your custom notes, and sort by creation date or alphabetically.
+- **Context Estimates** — Displays the exact message count and approximate context size per checkpoint/branch.
+- **Dock Icon & Wand Menu** — Accessible via an optional floating screen-edge dock icon or SillyTavern's native extensions wand menu.
 
 ## Installation
 
@@ -40,25 +37,23 @@ A lightweight, game-save-inspired floating checkpoint/branch navigator for [Sill
 
 ## Configuration
 
-Open **Extensions** panel → find **Ikarus Checkpoint** section:
+Open the **Extensions** panel and find the **Ikarus Checkpoint** section:
 
 | Setting | Description |
 |---------|-------------|
 | **Enable** | Toggle the extension on/off |
-| **Show Dock Icon** | Show/hide the floating bookmark button |
-| **Keyboard Shortcut** | Enable and configure a hotkey (e.g. `Alt+K`, `Ctrl+Shift+B`) |
-| **Open Navigator** | Button to open the checkpoint window |
+| **Show Dock Icon** | Show/hide the floating bookmark button on the edge of the screen |
+| **Open Navigator** | Button to manually open the checkpoint window |
 
 ## Usage
 
-1. **Open the window** via dock icon, wand menu, hotkey, or settings button
-2. **Checkpoints** section shows all bookmarks in the current chat
-3. **Branches** section shows all chat branches
-4. Click any card to **navigate** to that checkpoint/branch
-5. Use the **+ New** button to create a checkpoint at the current position
-6. Add **notes** to any checkpoint by clicking the pen icon field
-7. Use **search** to filter and the **sort button** to toggle date/alphabetical order
-8. When inside a checkpoint, use **Back to Main Chat** to return
+1. **Open the Hub** via the dock icon, wand menu, or settings panel.
+2. When you switch to a new character, the Hub will automatically scan all their past chats in the background.
+3. The **Checkpoints** section shows all bookmarks (Save States) across the character's history. Click one to **duplicate** it into a new active timeline.
+4. The **Branches** section shows all active alternate timelines. Click one to **jump** to it directly.
+5. Use the **Sync (🔄)** button in the top right to manually update the lists if you've recently created new bookmarks.
+6. Add **notes** to any item by clicking the pen icon field.
+7. Use **search** to filter and the **sort button** to toggle date/alphabetical order.
 
 ## Requirements
 
