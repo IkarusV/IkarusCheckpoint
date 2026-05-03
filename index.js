@@ -23,6 +23,7 @@
     let _currentFilter = '';
     let _activeCheckpointRoot = null;
     let _activeBranchSource = null;
+    let _viewportListenersAttached = false;
     
     // Cache per character: characterId -> { checkpoints: [], branches: [] }
     let _characterHubCache = {};
@@ -38,6 +39,7 @@
             autoScanOnCharacterChange: true,
             windowX: null, windowY: null,
             windowW: 380, windowH: 520,
+            dockX: null, dockY: null,
             notes: {},
             checkpointsCollapsed: false,
             branchesCollapsed: true,
@@ -343,15 +345,18 @@
 
         setupDrag(win);
         setupResize(win);
+        attachViewportListeners();
 
         const dock = document.createElement('div');
         dock.id = DOCK_ID;
         dock.classList.add('ikcp-dock-icon');
         dock.innerHTML = '<i class="fa-solid fa-bookmark"></i>';
         dock.title = 'Ikarus Checkpoint Hub';
-        dock.addEventListener('click', () => toggleWindow());
+        applySavedDockPosition(dock);
         document.body.appendChild(dock);
         _dockEl = dock;
+        setupDockDrag(dock);
+        clampDockToViewport(dock, true);
     }
 
     function showWindow() {
@@ -363,10 +368,13 @@
         // On mobile, force window above all ST panels and into visible area
         if (isMobile()) {
             _windowEl.style.zIndex = '10001';
-            _windowEl.style.left = '3vw';
-            _windowEl.style.top = '8vh';
-            _windowEl.style.right = 'auto';
+            if (s.windowX === null || s.windowY === null) {
+                _windowEl.style.left = '3vw';
+                _windowEl.style.top = '8vh';
+                _windowEl.style.right = 'auto';
+            }
         }
+        clampWindowToViewport(_windowEl, true);
 
         const badge = _windowEl.querySelector('.ikcp-char-badge');
         if (badge) badge.textContent = getCharacterName() || '—';
@@ -1426,92 +1434,356 @@
         return window.innerWidth <= 900 || ('ontouchstart' in window && window.innerWidth <= 1366);
     }
 
+    function getViewportBox() {
+        const vv = window.visualViewport;
+        const width = vv?.width || window.innerWidth || document.documentElement.clientWidth || 0;
+        const height = vv?.height || window.innerHeight || document.documentElement.clientHeight || 0;
+        return {
+            width,
+            height,
+            offsetLeft: vv?.offsetLeft || 0,
+            offsetTop: vv?.offsetTop || 0,
+        };
+    }
+
+    function clampNumber(value, min, max) {
+        if (max < min) return min;
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function getWindowBounds() {
+        const vp = getViewportBox();
+        const gap = isMobile() ? 5 : 0;
+        const maxW = Math.max(220, vp.width - (gap * 2));
+        const maxH = Math.max(180, vp.height - (gap * 2));
+        return {
+            vp,
+            gap,
+            minW: Math.min(320, maxW),
+            minH: Math.min(280, maxH),
+            maxW,
+            maxH,
+        };
+    }
+
+    function saveWindowState(win) {
+        if (!win) return;
+        const rect = win.getBoundingClientRect();
+        const s = getSettings();
+        s.windowX = Math.round(rect.left);
+        s.windowY = Math.round(rect.top);
+        s.windowW = Math.round(rect.width);
+        s.windowH = Math.round(rect.height);
+        saveSettings();
+    }
+
+    function clampWindowToViewport(win, save = false) {
+        if (!win || win.style.display === 'none') return;
+
+        const bounds = getWindowBounds();
+        let rect = win.getBoundingClientRect();
+        let width = rect.width;
+        let height = rect.height;
+        let changed = false;
+
+        if (width > bounds.maxW) {
+            width = bounds.maxW;
+            win.style.width = `${Math.round(width)}px`;
+            changed = true;
+        }
+        if (height > bounds.maxH) {
+            height = bounds.maxH;
+            win.style.height = `${Math.round(height)}px`;
+            changed = true;
+        }
+        if (width < bounds.minW) {
+            width = bounds.minW;
+            win.style.width = `${Math.round(width)}px`;
+            changed = true;
+        }
+        if (height < bounds.minH) {
+            height = bounds.minH;
+            win.style.height = `${Math.round(height)}px`;
+            changed = true;
+        }
+
+        rect = win.getBoundingClientRect();
+        width = rect.width;
+        height = rect.height;
+
+        const minLeft = bounds.vp.offsetLeft + bounds.gap;
+        const minTop = bounds.vp.offsetTop + bounds.gap;
+        const maxLeft = bounds.vp.offsetLeft + bounds.vp.width - width - bounds.gap;
+        const maxTop = bounds.vp.offsetTop + bounds.vp.height - height - bounds.gap;
+        const left = clampNumber(rect.left, minLeft, maxLeft);
+        const top = clampNumber(rect.top, minTop, maxTop);
+
+        if (Math.round(left) !== Math.round(rect.left) || Math.round(top) !== Math.round(rect.top)) {
+            win.style.left = `${Math.round(left)}px`;
+            win.style.top = `${Math.round(top)}px`;
+            win.style.right = 'auto';
+            win.style.bottom = 'auto';
+            changed = true;
+        }
+
+        if (save && changed) saveWindowState(win);
+    }
+
+    function saveDockPosition(icon) {
+        if (!icon) return;
+        const rect = icon.getBoundingClientRect();
+        const s = getSettings();
+        s.dockX = Math.round(rect.left);
+        s.dockY = Math.round(rect.top);
+        saveSettings();
+    }
+
+    function applySavedDockPosition(icon) {
+        const s = getSettings();
+        if (!icon || !Number.isFinite(s.dockX) || !Number.isFinite(s.dockY)) return;
+        icon.style.left = `${s.dockX}px`;
+        icon.style.top = `${s.dockY}px`;
+        icon.style.right = 'auto';
+        icon.style.bottom = 'auto';
+    }
+
+    function clampDockToViewport(icon, save = false) {
+        const s = getSettings();
+        if (!icon || !Number.isFinite(s.dockX) || !Number.isFinite(s.dockY)) return;
+
+        const vp = getViewportBox();
+        const gap = 6;
+        const rect = icon.getBoundingClientRect();
+        const width = rect.width || 46;
+        const height = rect.height || 46;
+        const minLeft = vp.offsetLeft + gap;
+        const minTop = vp.offsetTop + gap;
+        const maxLeft = vp.offsetLeft + vp.width - width - gap;
+        const maxTop = vp.offsetTop + vp.height - height - gap;
+        const left = clampNumber(rect.left, minLeft, maxLeft);
+        const top = clampNumber(rect.top, minTop, maxTop);
+
+        if (Math.round(left) === Math.round(rect.left) && Math.round(top) === Math.round(rect.top)) return;
+        icon.style.left = `${Math.round(left)}px`;
+        icon.style.top = `${Math.round(top)}px`;
+        icon.style.right = 'auto';
+        icon.style.bottom = 'auto';
+        if (save) saveDockPosition(icon);
+    }
+
+    function clampFloatingUi(save = false) {
+        clampWindowToViewport(_windowEl, save);
+        clampDockToViewport(_dockEl, save);
+    }
+
+    function attachViewportListeners() {
+        if (_viewportListenersAttached) return;
+        _viewportListenersAttached = true;
+
+        const onViewportChange = () => requestAnimationFrame(() => clampFloatingUi(true));
+        window.addEventListener('resize', onViewportChange);
+        window.addEventListener('orientationchange', () => setTimeout(onViewportChange, 80));
+        window.visualViewport?.addEventListener('resize', onViewportChange);
+        window.visualViewport?.addEventListener('scroll', onViewportChange);
+    }
+
     function setupDrag(win) {
         const header = win.querySelector('.ikcp-header');
         if (!header) return;
         let isDragging = false;
+        let pointerId = null;
         let startX, startY, startLeft, startTop;
 
-        header.addEventListener('mousedown', (e) => {
-            if (isMobile()) return;
+        header.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
             if (e.target.closest('.ikcp-hbtn')) return;
             isDragging = true;
+            pointerId = e.pointerId;
             win.classList.add('ikcp-dragging');
             const rect = win.getBoundingClientRect();
             startX = e.clientX; startY = e.clientY;
             startLeft = rect.left; startTop = rect.top;
+            header.setPointerCapture?.(pointerId);
             e.preventDefault();
         });
 
-        document.addEventListener('mousemove', (e) => {
+        header.addEventListener('pointermove', (e) => {
             if (!isDragging) return;
+            if (pointerId !== null && e.pointerId !== pointerId) return;
             let newLeft = startLeft + (e.clientX - startX);
             let newTop = startTop + (e.clientY - startY);
-            newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - 60));
-            newTop = Math.max(0, Math.min(newTop, window.innerHeight - 40));
             win.style.left = newLeft + 'px';
             win.style.top = newTop + 'px';
             win.style.right = 'auto';
+            win.style.bottom = 'auto';
+            clampWindowToViewport(win);
         });
 
-        document.addEventListener('mouseup', () => {
+        const finishDrag = (e) => {
             if (!isDragging) return;
+            if (pointerId !== null && e?.pointerId !== undefined && e.pointerId !== pointerId) return;
             isDragging = false;
+            if (pointerId !== null && header.hasPointerCapture?.(pointerId)) header.releasePointerCapture(pointerId);
+            pointerId = null;
             win.classList.remove('ikcp-dragging');
-            const s = getSettings();
-            s.windowX = parseInt(win.style.left, 10);
-            s.windowY = parseInt(win.style.top, 10);
-            saveSettings();
-        });
+            clampWindowToViewport(win);
+            saveWindowState(win);
+        };
+
+        header.addEventListener('pointerup', finishDrag);
+        header.addEventListener('pointercancel', finishDrag);
+        header.style.touchAction = 'none';
     }
 
     function setupResize(win) {
         const handles = win.querySelectorAll('.ikcp-rh');
         if (!handles.length) return;
-        let isResizing = false, resizeDir = '', startX, startY, startW, startH, startLeft, startTop;
+        let isResizing = false, pointerId = null, resizeDir = '', startX, startY, startW, startH, startLeft, startTop;
 
         handles.forEach(handle => {
-            handle.addEventListener('mousedown', (e) => {
-                if (isMobile()) return;
+            handle.addEventListener('pointerdown', (e) => {
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
                 isResizing = true;
+                pointerId = e.pointerId;
                 resizeDir = handle.dataset.dir;
                 win.classList.add('ikcp-resizing');
                 const rect = win.getBoundingClientRect();
                 startX = e.clientX; startY = e.clientY;
                 startW = rect.width; startH = rect.height;
                 startLeft = rect.left; startTop = rect.top;
+                handle.setPointerCapture?.(pointerId);
                 e.preventDefault(); e.stopPropagation();
             });
+
+            handle.addEventListener('pointermove', (e) => {
+                if (!isResizing) return;
+                if (pointerId !== null && e.pointerId !== pointerId) return;
+                const dx = e.clientX - startX, dy = e.clientY - startY;
+                const dir = resizeDir;
+                const bounds = getWindowBounds();
+                let newW = startW, newH = startH, newLeft = startLeft, newTop = startTop;
+
+                if (dir.includes('e')) newW = clampNumber(startW + dx, bounds.minW, bounds.maxW);
+                if (dir.includes('w')) {
+                    newW = clampNumber(startW - dx, bounds.minW, bounds.maxW);
+                    newLeft = startLeft + (startW - newW);
+                }
+                if (dir.includes('s')) newH = clampNumber(startH + dy, bounds.minH, bounds.maxH);
+                if (dir.includes('n')) {
+                    newH = clampNumber(startH - dy, bounds.minH, bounds.maxH);
+                    newTop = startTop + (startH - newH);
+                }
+
+                const minLeft = bounds.vp.offsetLeft + bounds.gap;
+                const minTop = bounds.vp.offsetTop + bounds.gap;
+                const maxLeft = bounds.vp.offsetLeft + bounds.vp.width - newW - bounds.gap;
+                const maxTop = bounds.vp.offsetTop + bounds.vp.height - newH - bounds.gap;
+                newLeft = clampNumber(newLeft, minLeft, maxLeft);
+                newTop = clampNumber(newTop, minTop, maxTop);
+
+                win.style.width = `${Math.round(newW)}px`;
+                win.style.height = `${Math.round(newH)}px`;
+                win.style.left = `${Math.round(newLeft)}px`;
+                win.style.top = `${Math.round(newTop)}px`;
+                win.style.right = 'auto';
+                win.style.bottom = 'auto';
+            });
+
+            const finishResize = (e) => {
+                if (!isResizing) return;
+                if (pointerId !== null && e?.pointerId !== undefined && e.pointerId !== pointerId) return;
+                isResizing = false;
+                if (pointerId !== null && handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId);
+                pointerId = null;
+                win.classList.remove('ikcp-resizing');
+                clampWindowToViewport(win);
+                saveWindowState(win);
+            };
+
+            handle.addEventListener('pointerup', finishResize);
+            handle.addEventListener('pointercancel', finishResize);
+            handle.style.touchAction = 'none';
+        });
+    }
+
+    function setupDockDrag(icon) {
+        if (!icon) return;
+        let pointerId = null;
+        let longPressTimer = null;
+        let dragReady = false;
+        let startX = 0, startY = 0, offsetX = 0, offsetY = 0;
+
+        const clearLongPress = () => {
+            if (longPressTimer) clearTimeout(longPressTimer);
+            longPressTimer = null;
+        };
+
+        const moveDock = (clientX, clientY) => {
+            const vp = getViewportBox();
+            const rect = icon.getBoundingClientRect();
+            const width = rect.width || 46;
+            const height = rect.height || 46;
+            const gap = 6;
+            const left = clampNumber(clientX - offsetX, vp.offsetLeft + gap, vp.offsetLeft + vp.width - width - gap);
+            const top = clampNumber(clientY - offsetY, vp.offsetTop + gap, vp.offsetTop + vp.height - height - gap);
+            icon.style.left = `${Math.round(left)}px`;
+            icon.style.top = `${Math.round(top)}px`;
+            icon.style.right = 'auto';
+            icon.style.bottom = 'auto';
+        };
+
+        icon.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'mouse' && e.button !== 0) return;
+            pointerId = e.pointerId;
+            dragReady = false;
+            startX = e.clientX;
+            startY = e.clientY;
+            const rect = icon.getBoundingClientRect();
+            offsetX = e.clientX - rect.left;
+            offsetY = e.clientY - rect.top;
+            icon.setPointerCapture?.(pointerId);
+            longPressTimer = setTimeout(() => {
+                dragReady = true;
+                icon.classList.add('ikcp-dock-dragging');
+            }, 450);
+            e.preventDefault();
         });
 
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
-            const dx = e.clientX - startX, dy = e.clientY - startY;
-            const dir = resizeDir, minW = 320, minH = 280;
-            let newW = startW, newH = startH, newLeft = startLeft, newTop = startTop;
+        icon.addEventListener('pointermove', (e) => {
+            if (pointerId === null || e.pointerId !== pointerId) return;
+            if (!dragReady) return;
+            moveDock(e.clientX, e.clientY);
+            e.preventDefault();
+        });
 
-            if (dir.includes('e')) newW = Math.max(minW, startW + dx);
-            if (dir.includes('w')) { newW = Math.max(minW, startW - dx); if (newW > minW) newLeft = startLeft + dx; }
-            if (dir.includes('s')) newH = Math.max(minH, startH + dy);
-            if (dir.includes('n') && dir !== 'ne' || dir === 'n' || dir === 'nw') {
-                newH = Math.max(minH, startH - dy); if (newH > minH) newTop = startTop + dy;
+        const finishDockPointer = (e) => {
+            if (pointerId === null || e?.pointerId !== pointerId) return;
+            const wasDragging = dragReady;
+            clearLongPress();
+            if (icon.hasPointerCapture?.(pointerId)) icon.releasePointerCapture(pointerId);
+            pointerId = null;
+            dragReady = false;
+            icon.classList.remove('ikcp-dock-dragging');
+
+            if (wasDragging) {
+                clampDockToViewport(icon);
+                saveDockPosition(icon);
+                return;
             }
-            if (dir === 'ne') { newH = Math.max(minH, startH - dy); if (newH > minH) newTop = startTop + dy; }
 
-            win.style.width = newW + 'px'; win.style.height = newH + 'px';
-            win.style.left = newLeft + 'px'; win.style.top = newTop + 'px';
-            win.style.right = 'auto';
-        });
+            const moved = Math.hypot(e.clientX - startX, e.clientY - startY) > 8;
+            if (!moved) toggleWindow();
+        };
 
-        document.addEventListener('mouseup', () => {
-            if (!isResizing) return;
-            isResizing = false;
-            win.classList.remove('ikcp-resizing');
-            const s = getSettings();
-            s.windowW = parseInt(win.style.width, 10); s.windowH = parseInt(win.style.height, 10);
-            s.windowX = parseInt(win.style.left, 10);  s.windowY = parseInt(win.style.top, 10);
-            saveSettings();
+        icon.addEventListener('pointerup', finishDockPointer);
+        icon.addEventListener('pointercancel', (e) => {
+            if (pointerId !== null && icon.hasPointerCapture?.(pointerId)) icon.releasePointerCapture(pointerId);
+            pointerId = null;
+            dragReady = false;
+            clearLongPress();
+            icon.classList.remove('ikcp-dock-dragging');
         });
+        icon.style.touchAction = 'none';
     }
 
 

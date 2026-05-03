@@ -85,6 +85,7 @@
 .ikcp-rh-se { bottom:0; right:0; width:10px; height:10px; cursor:se-resize; }
 .ikcp-rh-sw { bottom:0; left:0; width:10px; height:10px; cursor:sw-resize; }
 .ikcp-rh-nw { top:0; left:0; width:10px; height:10px; cursor:nw-resize; }
+.ikcp-rh { touch-action: none; }
 
 /* ── Header ──────────────────────────────────────────────────── */
 
@@ -153,6 +154,8 @@
     border: none;
     color: var(--ikcp-text-muted);
     cursor: pointer;
+    touch-action: none;
+    user-select: none;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -624,6 +627,8 @@
     border: 1px solid var(--ikcp-accent-dim, rgba(240,160,64,0.40));
     color: var(--ikcp-accent, #f0a040);
     cursor: pointer;
+    touch-action: none;
+    user-select: none;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -632,6 +637,11 @@
     transition: all 0.2s;
     font-size: 16px;
     animation: ikcp-dock-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ikcp-dock-icon.ikcp-dock-dragging {
+    cursor: grabbing;
+    transform: scale(1.08);
+    transition: none;
 }
 .ikcp-dock-icon:hover {
     background: var(--ikcp-accent, #f0a040);
@@ -680,13 +690,22 @@
 
 @media screen and (max-width: 900px) {
     .ikcp-window {
-        width: min(94vw, 560px) !important;
-        height: min(82dvh, 700px) !important;
-        left: 3vw !important;
-        top: 8vh !important;
         min-width: unset !important;
         max-width: calc(100vw - 10px) !important;
+        max-height: calc(100dvh - 10px) !important;
         z-index: 10001 !important;
+    }
+
+    .ikcp-rh-n  { height: 10px; }
+    .ikcp-rh-s  { height: 10px; }
+    .ikcp-rh-e  { width: 10px; }
+    .ikcp-rh-w  { width: 10px; }
+    .ikcp-rh-ne,
+    .ikcp-rh-se,
+    .ikcp-rh-sw,
+    .ikcp-rh-nw {
+        width: 20px;
+        height: 20px;
     }
     
     .ikcp-dock-icon {
