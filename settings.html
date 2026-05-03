@@ -1,4 +1,4 @@
-<div class="ikcp-settings">
+<div id="ikarus_checkpoint_container" class="ikcp-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
             <b>Ikarus Checkpoint</b>
@@ -34,7 +34,31 @@
                     </small>
                 </div>
 
+                <div class="ikcp-settings-section" style="margin-top:8px">
+                    <label class="checkbox_label">
+                        <input id="ikcp-auto-scan-character" type="checkbox" />
+                        <span>Auto scan when character changes</span>
+                    </label>
+                    <small style="display:block; margin-top:4px; color:#888; font-size:11px;">
+                        When disabled, changing characters only loads already cached hub data. Use Sync to scan manually.
+                    </small>
+                </div>
 
+                <div class="ikcp-settings-section" style="margin-top:8px">
+                    <b style="font-size:12px;">Detect</b>
+                    <label class="checkbox_label" style="margin-top:4px;">
+                        <input id="ikcp-detect-checkpoints" type="checkbox" />
+                        <span>Checkpoints</span>
+                    </label>
+                    <label class="checkbox_label" style="margin-top:4px;">
+                        <input id="ikcp-detect-branches" type="checkbox" />
+                        <span>Branches</span>
+                    </label>
+                    <label class="checkbox_label" style="margin-top:4px;">
+                        <input id="ikcp-detect-swipes" type="checkbox" />
+                        <span>Swipes</span>
+                    </label>
+                </div>
 
                 <div style="margin-top:10px">
                     <button id="ikcp-open-window" class="menu_button interactable" style="width:100%">

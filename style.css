@@ -164,6 +164,14 @@
     font-size: 13px;
 }
 .ikcp-hbtn:hover { color: var(--ikcp-text); background: rgba(255,255,255,0.07); }
+.ikcp-btn-deep-scan {
+    color: var(--ikcp-danger);
+    background: rgba(224,80,80,0.08);
+}
+.ikcp-btn-deep-scan:hover {
+    color: #fff;
+    background: var(--ikcp-danger);
+}
 .ikcp-hbtn-close:hover { color: var(--ikcp-danger); background: rgba(224,80,80,0.1); }
 
 /* ── Content Area ────────────────────────────────────────────── */
@@ -334,6 +342,11 @@
     gap: 8px;
 }
 
+.ikcp-card-child {
+    margin-left: 14px;
+    border-left: 2px solid var(--ikcp-accent-dim);
+}
+
 .ikcp-card-icon {
     color: var(--ikcp-accent);
     font-size: 14px;
@@ -349,6 +362,53 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+}
+
+.ikcp-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.ikcp-card-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 28px;
+    height: 26px;
+    padding: 0 7px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(0,0,0,0.22);
+    color: var(--ikcp-text-muted);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
+}
+.ikcp-card-action:hover {
+    color: var(--ikcp-accent);
+    border-color: var(--ikcp-accent-dim);
+    background: var(--ikcp-accent-bg);
+}
+.ikcp-card-action:active { transform: translateY(1px); }
+.ikcp-card-action-create {
+    color: var(--ikcp-accent);
+    border-color: var(--ikcp-accent-dim);
+    background: var(--ikcp-accent-bg);
+}
+.ikcp-card-action-create:hover {
+    color: #fff;
+    border-color: var(--ikcp-accent);
+    background: var(--ikcp-accent);
+}
+.ikcp-card-action span {
+    font-size: 10px;
+    font-weight: 700;
 }
 
 .ikcp-card-meta {
@@ -371,11 +431,94 @@
     color: var(--ikcp-accent);
 }
 
+.ikcp-badge-subtle {
+    background: rgba(255,255,255,0.035);
+    color: var(--ikcp-text-muted);
+}
+
 .ikcp-card-date {
     font-size: 10px;
     color: var(--ikcp-text-muted);
     margin-left: auto;
     flex-shrink: 0;
+}
+
+.ikcp-folder-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 2px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 2px;
+}
+
+.ikcp-folder-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(0,0,0,0.22);
+    color: var(--ikcp-text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.ikcp-folder-back:hover {
+    color: var(--ikcp-accent);
+    border-color: var(--ikcp-accent-dim);
+    background: var(--ikcp-accent-bg);
+}
+
+.ikcp-folder-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    flex: 1;
+    color: var(--ikcp-text);
+    font-size: 12px;
+    font-weight: 700;
+}
+.ikcp-folder-title i {
+    color: var(--ikcp-accent);
+    flex-shrink: 0;
+}
+.ikcp-folder-title span:not(.ikcp-folder-count) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ikcp-folder-count {
+    color: var(--ikcp-accent);
+    background: var(--ikcp-accent-bg);
+    border-radius: 999px;
+    padding: 1px 7px;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.ikcp-folder-category {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+}
+
+.ikcp-folder-category-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 2px;
+    color: var(--ikcp-text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.ikcp-folder-category-title i {
+    color: var(--ikcp-accent);
 }
 
 /* ── Note Field ──────────────────────────────────────────────── */
@@ -427,6 +570,10 @@
     color: var(--ikcp-text-muted);
     font-size: 12px;
     font-style: italic;
+}
+.ikcp-empty-compact {
+    padding: 10px 12px;
+    font-size: 11px;
 }
 
 /* ── Footer / Back to Main ───────────────────────────────────── */
