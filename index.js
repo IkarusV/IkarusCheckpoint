@@ -23,6 +23,7 @@
     let _currentFilter = '';
     let _activeCheckpointRoot = null;
     let _activeBranchSource = null;
+    let _activeSwipeSource = null;
     let _viewportListenersAttached = false;
     
     // Cache per character: characterId -> { checkpoints: [], branches: [] }
@@ -184,6 +185,7 @@
             if (charId !== undefined) delete _characterHubCache[charId];
             _activeCheckpointRoot = null;
             _activeBranchSource = null;
+            _activeSwipeSource = null;
             syncAllCharacterChats();
         };
         bindCheck('ikcp-detect-checkpoints', 'detectCheckpoints', resyncDetection);
@@ -195,7 +197,9 @@
 
     function updateDockVisibility() {
         const s = getSettings();
-        if (_dockEl) _dockEl.style.display = (s.enabled && s.showDock) ? 'flex' : 'none';
+        if (!_dockEl) return;
+        if (s.enabled && s.showDock) _dockEl.style.setProperty('display', 'flex', 'important');
+        else _dockEl.style.setProperty('display', 'none', 'important');
     }
 
     function onChatChanged() {
@@ -598,7 +602,6 @@
                     childCount: 0,
                     messageIndex,
                     _seenBranchChildren: new Set(),
-                    _seenSwipeChildren: new Set(),
                 }));
             }
             return parentMap.get(cleanSource);
@@ -621,20 +624,50 @@
                 sendDate: link.sendDate,
                 inferred: !!link.inferred,
                 matchCount: link.matchCount,
+                swipeChildren: swipeLinks[branchFile] || [],
+                swipeCount: (swipeLinks[branchFile] || []).length,
             }));
         }
 
-        for (const link of swipeLinks) {
+        for (const [sourceChat, swipes] of Object.entries(swipeLinks || {})) {
+            const cleanSource = stripJsonl(sourceChat);
+            const parent = parentMap.get(cleanSource);
+            if (!parent) continue;
+            parent.swipeChildren = swipes;
+            parent.swipeCount = swipes.length;
+        }
+
+        for (const parent of parentMap.values()) {
+            const byDateThenMessage = (a, b) => {
+                const dateDiff = getItemDateValue(b) - getItemDateValue(a);
+                if (dateDiff) return dateDiff;
+                if (a.messageIndex !== b.messageIndex) return a.messageIndex - b.messageIndex;
+                return a.name.localeCompare(b.name);
+            };
+            parent.branchChildren.sort(byDateThenMessage);
+            parent.swipeChildren = parent.swipeChildren || [];
+            parent.swipeChildren.sort(byDateThenMessage);
+            parent.children = [...parent.branchChildren];
+            parent.childCount = parent.branchChildren.length;
+            delete parent._seenBranchChildren;
+        }
+
+        return Array.from(parentMap.values());
+    }
+
+    function buildSwipesBySource(swipeLinks) {
+        const swipesBySource = {};
+        const seen = new Set();
+
+        for (const link of swipeLinks || []) {
             const sourceChat = stripJsonl(link.sourceChat);
             if (!sourceChat) continue;
+            const swipeKey = `${sourceChat}::${link.messageIndex}::${link.swipeIndex}`;
+            if (seen.has(swipeKey)) continue;
+            seen.add(swipeKey);
 
-            const parent = ensureParent(sourceChat, link.messageIndex);
-            const swipeKey = `${link.messageIndex}::${link.swipeIndex}`;
-            if (parent._seenSwipeChildren.has(swipeKey)) continue;
-            parent._seenSwipeChildren.add(swipeKey);
-            parent.messageIndex = Math.min(parent.messageIndex ?? link.messageIndex, link.messageIndex);
-
-            parent.swipeChildren.push({
+            if (!swipesBySource[sourceChat]) swipesBySource[sourceChat] = [];
+            swipesBySource[sourceChat].push({
                 fileName: sourceChat,
                 name: link.name,
                 kind: 'swipe',
@@ -648,22 +681,16 @@
             });
         }
 
-        for (const parent of parentMap.values()) {
-            const byDateThenMessage = (a, b) => {
+        for (const swipes of Object.values(swipesBySource)) {
+            swipes.sort((a, b) => {
                 const dateDiff = getItemDateValue(b) - getItemDateValue(a);
                 if (dateDiff) return dateDiff;
                 if (a.messageIndex !== b.messageIndex) return a.messageIndex - b.messageIndex;
-                return a.name.localeCompare(b.name);
-            };
-            parent.branchChildren.sort(byDateThenMessage);
-            parent.swipeChildren.sort(byDateThenMessage);
-            parent.children = [...parent.branchChildren, ...parent.swipeChildren];
-            parent.childCount = parent.children.length;
-            delete parent._seenBranchChildren;
-            delete parent._seenSwipeChildren;
+                return (a.swipeIndex ?? 0) - (b.swipeIndex ?? 0);
+            });
         }
 
-        return Array.from(parentMap.values());
+        return swipesBySource;
     }
 
     function mergeBranchLinks(...linkLists) {
@@ -841,7 +868,8 @@
             const deepBranchLinks = inferDeepBranchLinks(records, existing);
             const quickBranchLinks = existing.quickBranchLinks || [];
             const swipeLinks = existing.swipeLinks || [];
-            const allBranches = buildBranchParents(mergeBranchLinks(quickBranchLinks, deepBranchLinks), swipeLinks, chatFileMetadata);
+            const swipesBySource = existing.swipesBySource || buildSwipesBySource(swipeLinks);
+            const allBranches = buildBranchParents(mergeBranchLinks(quickBranchLinks, deepBranchLinks), swipesBySource, chatFileMetadata);
             const branchCount = allBranches.reduce((sum, item) => sum + (item.children?.length || 0), 0);
 
             _characterHubCache[charId] = {
@@ -850,6 +878,7 @@
                 branchCount,
                 quickBranchLinks,
                 swipeLinks,
+                swipesBySource,
                 deepBranchLinks,
                 chatFileMetadata,
             };
@@ -994,7 +1023,8 @@
             allCheckpoints = buildCheckpointFamilies(allCheckpoints, chatFiles, chatFileMetadata);
             const preservedDeepBranchLinks = (existingCache.deepBranchLinks || [])
                 .filter(link => chatFileSet.has(stripJsonl(link.sourceChat)) && chatFileSet.has(stripJsonl(link.fileName)));
-            const allBranches = buildBranchParents(mergeBranchLinks(allBranchLinks, preservedDeepBranchLinks), allSwipeLinks, chatFileMetadata);
+            const swipesBySource = buildSwipesBySource(allSwipeLinks);
+            const allBranches = buildBranchParents(mergeBranchLinks(allBranchLinks, preservedDeepBranchLinks), swipesBySource, chatFileMetadata);
             const branchCount = allBranches.reduce((sum, item) => sum + (item.children?.length || 0), 0);
 
             // Save to cache
@@ -1004,6 +1034,7 @@
                 branchCount,
                 quickBranchLinks: allBranchLinks,
                 swipeLinks: allSwipeLinks,
+                swipesBySource,
                 deepBranchLinks: preservedDeepBranchLinks,
                 chatFileMetadata,
             };
@@ -1137,9 +1168,18 @@
         const childMatch = (item.children || []).some(child => {
             const childNote = getSettings().notes[child.fileName] || '';
             const childHaystack = `${child.name} ${child.searchText || ''}`.toLowerCase();
-            return childHaystack.includes(_currentFilter) || childNote.toLowerCase().includes(_currentFilter);
+            const childOwnMatch = childHaystack.includes(_currentFilter) || childNote.toLowerCase().includes(_currentFilter);
+            const childSwipeMatch = (child.swipeChildren || []).some(swipe => {
+                const swipeHaystack = `${swipe.name} ${swipe.searchText || ''}`.toLowerCase();
+                return swipeHaystack.includes(_currentFilter);
+            });
+            return childOwnMatch || childSwipeMatch;
         });
-        return ownMatch || childMatch;
+        const swipeMatch = (item.swipeChildren || []).some(swipe => {
+            const swipeHaystack = `${swipe.name} ${swipe.searchText || ''}`.toLowerCase();
+            return swipeHaystack.includes(_currentFilter);
+        });
+        return ownMatch || childMatch || swipeMatch;
     }
 
     function sortHubItems(items) {
@@ -1164,13 +1204,34 @@
 
     function openBranchFolder(sourceChat) {
         _activeBranchSource = stripJsonl(sourceChat);
+        _activeSwipeSource = null;
+        renderFromCache();
+    }
+
+    function openSwipeFolder(sourceChat) {
+        _activeSwipeSource = stripJsonl(sourceChat);
         renderFromCache();
     }
 
     function closeFolder(type) {
         if (type === 'checkpoints') _activeCheckpointRoot = null;
-        if (type === 'branches') _activeBranchSource = null;
+        if (type === 'branches') {
+            _activeBranchSource = null;
+            _activeSwipeSource = null;
+        }
+        if (type === 'swipes') _activeSwipeSource = null;
         renderFromCache();
+    }
+
+    function findBranchItemByFile(items, fileName) {
+        const cleanFile = stripJsonl(fileName);
+        for (const item of items || []) {
+            if (stripJsonl(item.fileName) === cleanFile) return item;
+            for (const child of item.branchChildren || []) {
+                if (stripJsonl(child.fileName) === cleanFile) return child;
+            }
+        }
+        return null;
     }
 
     function renderList(type, items, iconClass, itemType) {
@@ -1186,6 +1247,15 @@
                 return;
             }
             _activeCheckpointRoot = null;
+        }
+
+        if (type === 'branches' && _activeSwipeSource) {
+            const swipeSource = findBranchItemByFile(sourceItems, _activeSwipeSource);
+            if (swipeSource) {
+                renderSwipeFolderList(listEl, swipeSource);
+                return;
+            }
+            _activeSwipeSource = null;
         }
 
         if (type === 'branches' && _activeBranchSource) {
@@ -1222,13 +1292,9 @@
     function renderBranchSwipeFolderList(listEl, parent) {
         const settings = getSettings();
         const branchItems = sortHubItems((parent.branchChildren || []).filter(itemMatchesFilter));
-        const swipeItems = sortHubItems((parent.swipeChildren || []).filter(itemMatchesFilter));
         const branchCards = branchItems.length
             ? branchItems.map(item => buildCardHTML(item, 'fa-code-branch', 'branch-child')).join('')
             : `<div class="ikcp-empty ikcp-empty-compact">No branches found.</div>`;
-        const swipeCards = swipeItems.length
-            ? swipeItems.map(item => buildCardHTML(item, 'fa-clone', 'swipe-child')).join('')
-            : `<div class="ikcp-empty ikcp-empty-compact">No swipes found.</div>`;
 
         const branchSection = settings.detectBranches ? `
             <div class="ikcp-folder-category">
@@ -1239,29 +1305,38 @@
                 </div>
                 ${branchCards}
             </div>` : '';
-        const swipeSection = settings.detectSwipes ? `
-            <div class="ikcp-folder-category">
-                <div class="ikcp-folder-category-title">
-                    <i class="fa-solid fa-clone"></i>
-                    <span>Swipes</span>
-                    <span class="ikcp-folder-count">${swipeItems.length}</span>
-                </div>
-                ${swipeCards}
-            </div>` : '';
 
-        listEl.innerHTML = buildFolderHeaderHTML('branches', parent, parent.childCount || 0) + branchSection + swipeSection;
+        listEl.innerHTML = buildFolderHeaderHTML('branches', parent, parent.childCount || 0) + branchSection;
+        wireCardEvents(listEl);
+    }
+
+    function renderSwipeFolderList(listEl, parent) {
+        const swipeItems = sortHubItems((parent.swipeChildren || []).filter(itemMatchesFilter));
+        const swipeCards = swipeItems.length
+            ? swipeItems.map(item => buildCardHTML(item, 'fa-clone', 'swipe-child')).join('')
+            : `<div class="ikcp-empty ikcp-empty-compact">No swipes found.</div>`;
+
+        listEl.innerHTML = buildFolderHeaderHTML('swipes', parent, parent.swipeChildren?.length || 0) + swipeCards;
         wireCardEvents(listEl);
     }
 
     function buildFolderHeaderHTML(type, parent, count) {
         const isCheckpoint = type === 'checkpoints';
+        const isSwipe = type === 'swipes';
         const title = isCheckpoint ? (parent.rootName || parent.name) : parent.name;
-        const icon = isCheckpoint ? 'fa-folder-open' : 'fa-code-branch';
+        const icon = isCheckpoint ? 'fa-folder-open' : isSwipe ? 'fa-clone' : 'fa-code-branch';
         const createButton = isCheckpoint ? `
             <button type="button" class="ikcp-card-action ikcp-card-action-create"
                 data-action="create-checkpoint" data-file="${escAttr(parent.fileName)}"
                 title="Create a new checkpoint copy">
                 <i class="fa-solid fa-plus"></i>
+            </button>` : '';
+        const swipeButton = !isCheckpoint && !isSwipe && parent.swipeChildren?.length ? `
+            <button type="button" class="ikcp-card-action ikcp-card-action-swipe"
+                data-action="open-swipe-folder" data-source="${escAttr(parent.fileName)}"
+                title="Show swipes in this chat">
+                <span>S</span>
+                <span>${parent.swipeChildren.length}</span>
             </button>` : '';
 
         return `
@@ -1275,6 +1350,7 @@
                 <span class="ikcp-folder-count">${count}</span>
             </div>
             ${createButton}
+            ${swipeButton}
         </div>`;
     }
 
@@ -1284,6 +1360,7 @@
         const isCheckpointParent = itemType === 'checkpoints';
         const isBranchParent = itemType === 'branches';
         const isChild = itemType === 'checkpoint-child' || itemType === 'branch-child' || itemType === 'swipe-child';
+        const swipeCount = item.swipeChildren?.length || 0;
         const rootName = item.rootName || getCheckpointRootName(item.fileName);
         const copyBadge = itemType === 'checkpoint-child'
             ? `<span class="ikcp-badge ikcp-badge-subtle">${item.isOriginal ? 'Original' : `#${item.copyNumber}`}</span>`
@@ -1296,6 +1373,13 @@
             : itemType === 'swipe-child'
                 ? `Open ${item.fileName} at message ${item.messageIndex + 1}`
                 : `Click to open ${item.fileName}`;
+        const swipeAction = swipeCount && itemType !== 'swipe-child' ? `
+                    <button type="button" class="ikcp-card-action ikcp-card-action-swipe"
+                        data-action="open-swipe-folder" data-source="${escAttr(item.fileName)}"
+                        title="Show swipes in this chat">
+                        <span>S</span>
+                        <span>${swipeCount}</span>
+                    </button>` : '';
         const cardActions = isCheckpointParent ? `
                 <div class="ikcp-card-actions">
                     <button type="button" class="ikcp-card-action ikcp-card-action-create"
@@ -1309,6 +1393,7 @@
                         <i class="fa-solid fa-folder-open"></i>
                         <span>${item.childCount || 0}</span>
                     </button>
+                    ${swipeAction}
                 </div>` : isBranchParent ? `
                 <div class="ikcp-card-actions">
                     <button type="button" class="ikcp-card-action"
@@ -1317,6 +1402,10 @@
                         <i class="fa-solid fa-folder-open"></i>
                         <span>${item.childCount || 0}</span>
                     </button>
+                    ${swipeAction}
+                </div>` : swipeAction ? `
+                <div class="ikcp-card-actions">
+                    ${swipeAction}
                 </div>` : '';
         const msgCountText = item.metaText || (item.messageCount !== undefined ? `${item.messageCount} msgs` : '…');
         const ctxText = item.contextSize !== undefined ? formatContextSize(item.contextSize) : '…';
@@ -1388,6 +1477,14 @@
                 e.preventDefault();
                 e.stopPropagation();
                 openBranchFolder(btn.dataset.source);
+            });
+        });
+
+        listEl.querySelectorAll('[data-action="open-swipe-folder"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openSwipeFolder(btn.dataset.source);
             });
         });
 

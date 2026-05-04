@@ -409,6 +409,17 @@
     border-color: var(--ikcp-accent);
     background: var(--ikcp-accent);
 }
+.ikcp-card-action-swipe {
+    color: var(--ikcp-accent);
+    border-color: var(--ikcp-accent-dim);
+    background: rgba(240, 160, 64, 0.08);
+    font-weight: 800;
+}
+.ikcp-card-action-swipe:hover {
+    color: #fff;
+    border-color: var(--ikcp-accent);
+    background: var(--ikcp-accent);
+}
 .ikcp-card-action span {
     font-size: 10px;
     font-weight: 700;
@@ -632,7 +643,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 9800;
+    z-index: 99999;
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     transition: all 0.2s;
     font-size: 16px;
@@ -711,7 +722,7 @@
     .ikcp-dock-icon {
         bottom: max(140px, calc(env(safe-area-inset-bottom, 0px) + 120px));
         right: max(14px, env(safe-area-inset-right, 14px));
-        z-index: 9990;
+        z-index: 99999;
         width: 46px;
         height: 46px;
         font-size: 18px;
