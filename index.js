@@ -42,6 +42,8 @@
             windowW: 380, windowH: 520,
             dockX: null, dockY: null,
             notes: {},
+            hubCache: {},
+            hubCacheVersion: 1,
             checkpointsCollapsed: false,
             branchesCollapsed: true,
             detectCheckpoints: true,
@@ -57,6 +59,23 @@
 
     function saveSettings() {
         SillyTavern.getContext().saveSettingsDebounced();
+    }
+
+    function getStoredHubCache() {
+        const s = getSettings();
+        if (!s.hubCache || typeof s.hubCache !== 'object' || Array.isArray(s.hubCache)) s.hubCache = {};
+        return s.hubCache;
+    }
+
+    function loadHubCacheFromSettings() {
+        _characterHubCache = getStoredHubCache();
+    }
+
+    function persistHubCache() {
+        const s = getSettings();
+        s.hubCache = _characterHubCache;
+        s.hubCacheVersion = 1;
+        saveSettings();
     }
 
     function escHtml(str) {
@@ -133,9 +152,18 @@
     }
     function getCharacterName() { return getCharacter()?.name || ''; }
     function getCharacterAvatar() { return getCharacter()?.avatar || ''; }
+    function getCharacterCacheKey() {
+        const avatar = getCharacterAvatar();
+        if (avatar) return `avatar:${avatar}`;
+        const name = getCharacterName();
+        if (name) return `name:${name}`;
+        const id = getCharacterId();
+        return id !== undefined ? `id:${id}` : null;
+    }
 
     async function init() {
         const ctx = SillyTavern.getContext();
+        loadHubCacheFromSettings();
         try {
             const container = document.getElementById('extensions_settings2');
             if (container) {
@@ -161,8 +189,8 @@
         // Initial check: if a character is already loaded when extension initializes
         // (important for mobile where CHAT_CHANGED may fire before extension loads)
         setTimeout(() => {
-            const charId = getCharacterId();
-            if (getSettings().autoScanOnCharacterChange && charId !== undefined && !_characterHubCache[charId]) {
+            const cacheKey = getCharacterCacheKey();
+            if (getSettings().autoScanOnCharacterChange && cacheKey && !_characterHubCache[cacheKey]) {
                 syncAllCharacterChats();
             }
         }, 800);
@@ -181,8 +209,11 @@
         bindCheck('ikcp-show-notifs', 'showNotifications');
         bindCheck('ikcp-auto-scan-character', 'autoScanOnCharacterChange');
         const resyncDetection = () => {
-            const charId = getCharacterId();
-            if (charId !== undefined) delete _characterHubCache[charId];
+            const cacheKey = getCharacterCacheKey();
+            if (cacheKey) {
+                delete _characterHubCache[cacheKey];
+                persistHubCache();
+            }
             _activeCheckpointRoot = null;
             _activeBranchSource = null;
             _activeSwipeSource = null;
@@ -208,8 +239,8 @@
             if (badge) badge.textContent = getCharacterName() || '—';
         }
         
-        const charId = getCharacterId();
-        if (charId !== undefined && !_characterHubCache[charId]) {
+        const cacheKey = getCharacterCacheKey();
+        if (cacheKey && !_characterHubCache[cacheKey]) {
             // Auto-sync only when enabled. Otherwise just show cached state/manual sync prompt.
             if (getSettings().autoScanOnCharacterChange) syncAllCharacterChats();
             else if (_isOpen) renderFromCache();
@@ -849,12 +880,13 @@
     async function deepScanBranches() {
         const charId = getCharacterId();
         const charAvatar = getCharacterAvatar();
+        const cacheKey = getCharacterCacheKey();
         if (charId === undefined || !charAvatar) {
             toastr?.warning('No active character selected.', EXT_DISPLAY);
             return;
         }
 
-        if (!_characterHubCache[charId]) {
+        if (cacheKey && !_characterHubCache[cacheKey]) {
             await syncAllCharacterChats();
         }
 
@@ -864,7 +896,7 @@
 
         try {
             const { records, chatFileMetadata } = await fetchCharacterChatRecords();
-            const existing = _characterHubCache[charId] || {};
+            const existing = _characterHubCache[cacheKey] || {};
             const deepBranchLinks = inferDeepBranchLinks(records, existing);
             const quickBranchLinks = existing.quickBranchLinks || [];
             const swipeLinks = existing.swipeLinks || [];
@@ -872,7 +904,7 @@
             const allBranches = buildBranchParents(mergeBranchLinks(quickBranchLinks, deepBranchLinks), swipesBySource, chatFileMetadata);
             const branchCount = allBranches.reduce((sum, item) => sum + (item.children?.length || 0), 0);
 
-            _characterHubCache[charId] = {
+            _characterHubCache[cacheKey] = {
                 ...existing,
                 branches: allBranches,
                 branchCount,
@@ -881,7 +913,9 @@
                 swipesBySource,
                 deepBranchLinks,
                 chatFileMetadata,
+                cachedAt: new Date().toISOString(),
             };
+            persistHubCache();
 
             renderFromCache();
             toastr?.success(`Deep scan found ${deepBranchLinks.length} inferred branch${deepBranchLinks.length !== 1 ? 'es' : ''}.`, EXT_DISPLAY);
@@ -896,6 +930,7 @@
         const charId = getCharacterId();
         const charAvatar = getCharacterAvatar();
         const charName = getCharacterName();
+        const cacheKey = getCharacterCacheKey();
         if (charId === undefined || !charAvatar) {
             toastr?.warning('No active character selected.', EXT_DISPLAY);
             return;
@@ -921,7 +956,7 @@
             const chatFiles = Object.values(chatDict).map(c => c.file_name);
             const chatFileSet = new Set(chatFiles.map(stripJsonl));
             const settings = getSettings();
-            const existingCache = _characterHubCache[charId] || {};
+            const existingCache = _characterHubCache[cacheKey] || {};
 
             let allCheckpoints = [];
             let allBranchLinks = [];
@@ -1028,7 +1063,7 @@
             const branchCount = allBranches.reduce((sum, item) => sum + (item.children?.length || 0), 0);
 
             // Save to cache
-            _characterHubCache[charId] = {
+            _characterHubCache[cacheKey] = {
                 checkpoints: allCheckpoints,
                 branches: allBranches,
                 branchCount,
@@ -1037,7 +1072,9 @@
                 swipesBySource,
                 deepBranchLinks: preservedDeepBranchLinks,
                 chatFileMetadata,
+                cachedAt: new Date().toISOString(),
             };
+            persistHubCache();
 
             const totalChats = chatFiles.length;
             if (getSettings().showNotifications) {
@@ -1052,7 +1089,7 @@
             renderFromCache();
 
             // Fire off async tasks to get exact message counts for these files
-            fetchDetailsBackground(charId, allCheckpoints, allBranches);
+            fetchDetailsBackground(cacheKey, allCheckpoints, allBranches);
 
         } catch (e) {
             console.error(`[${EXT_DISPLAY}] Sync failed:`, e);
@@ -1062,10 +1099,11 @@
         }
     }
 
-    async function fetchDetailsBackground(charId, checkpoints, branches) {
+    async function fetchDetailsBackground(cacheKey, checkpoints, branches) {
         const ctx = SillyTavern.getContext();
         const charName = getCharacterName();
         const charAvatar = getCharacterAvatar();
+        let updated = false;
         
         const allItems = [];
         const seenItems = new Set();
@@ -1105,9 +1143,10 @@
                         let size = 0;
                         for(let m of chatData) { if(m && m.mes && !m.is_system) size += m.mes.length; }
                         item.contextSize = size;
+                        updated = true;
                         
                         // Update UI if still on same character
-                        if (getCharacterId() === charId && _windowEl) {
+                        if (getCharacterCacheKey() === cacheKey && _windowEl) {
                             const cards = _windowEl.querySelectorAll(`[data-file="${CSS.escape(stripJsonl(item.fileName))}"]:not([data-type="swipe-child"])`);
                             cards.forEach(card => {
                                 const msgBadge = card.querySelector('.ikcp-badge-msg-count');
@@ -1120,19 +1159,20 @@
                 }
             } catch(e) {}
         }
+        if (updated) persistHubCache();
     }
 
     // ── Rendering ───────────────────────────────────────────────
 
     function renderFromCache() {
         if (!_windowEl) return;
-        const charId = getCharacterId();
-        if (charId === undefined) {
+        const cacheKey = getCharacterCacheKey();
+        if (!cacheKey) {
             clearLists('No character selected.');
             return;
         }
 
-        const data = _characterHubCache[charId];
+        const data = _characterHubCache[cacheKey];
         if (!data) {
             clearLists('Click Sync (top right) to scan character chats.');
             return;
