@@ -16,11 +16,15 @@ A lightweight floating checkpoint, branch, and swipe navigator for [SillyTavern]
 - **Floating window** - Draggable, resizable glass panel with mobile-friendly sizing, an optional dock icon, and a SillyTavern wand-menu entry.
 - **Context estimates** - Shows message count and approximate context size where available.
 
-<img width="792" height="1056" alt="Ikarus Hub checkpoint list" src="https://github.com/user-attachments/assets/65b2c5cf-b056-486a-bc44-3f8bbc5c2c23" />
 
-<img width="900" height="1244" alt="Ikarus Hub floating panel" src="https://github.com/user-attachments/assets/2d022685-d9dd-40f8-9a65-ecba523f2dc1" />
+Checkpoint have two button one for creating new checkpoint and one to access all the checkpoint created by this checkpoint so you never lose all you precious checkpoint adventure !
+<img width="813" height="995" alt="image" src="https://github.com/user-attachments/assets/8a3e769f-1cc5-44d2-8a19-3c3d4c214f31" />
 
-<img width="652" height="354" alt="Ikarus Hub compact view" src="https://github.com/user-attachments/assets/8e695ca0-b0ef-4ab6-8380-5a3be3e5c948" />
+
+Swipe counter and selector !
+<img width="761" height="568" alt="image" src="https://github.com/user-attachments/assets/00e59263-fcdd-4f5c-bb05-319955a328e4" />
+
+<img width="821" height="842" alt="image" src="https://github.com/user-attachments/assets/e6679d62-e824-4427-b406-7e2732ce503d" />
 
 ## Installation
 
