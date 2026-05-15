@@ -21,6 +21,7 @@
     let _dockEl = null;
     let _isOpen = false;
     let _currentFilter = '';
+    let _qrFilter = '';
     let _activeCheckpointRoot = null;
     let _activeBranchSource = null;
     let _activeSwipeSource = null;
@@ -48,6 +49,10 @@
             detectBranches: true,
             detectSwipes: true,
             sortMode: 'date',
+            activeTab: 'hub',
+            qrCache: null,
+            qrCacheVersion: 1,
+            qrCollapsedSets: {},
         };
         for (const [k, v] of Object.entries(defaults)) {
             if (s[k] === undefined) s[k] = v;
@@ -138,6 +143,12 @@
         return clean.length > maxLength ? `${clean.slice(0, maxLength - 1)}…` : clean;
     }
 
+    function previewQrText(text, maxLength = 92) {
+        const clean = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!clean) return '(empty quick reply)';
+        return clean.length > maxLength ? `${clean.slice(0, maxLength - 1)}…` : clean;
+    }
+
     function formatContextSize(charCount) {
         if (charCount < 1000) return `~${charCount}`;
         return `~${Math.round(charCount / 1000)}K`;
@@ -157,6 +168,122 @@
         if (name) return `name:${name}`;
         const id = getCharacterId();
         return id !== undefined ? `id:${id}` : null;
+    }
+
+    function getQuickReplyApi() {
+        return globalThis.quickReplyApi || null;
+    }
+
+    function getQrCache() {
+        const s = getSettings();
+        if (!s.qrCache || typeof s.qrCache !== 'object' || Array.isArray(s.qrCache)) {
+            s.qrCache = { sets: [], cachedAt: null };
+        }
+        if (!Array.isArray(s.qrCache.sets)) s.qrCache.sets = [];
+        return s.qrCache;
+    }
+
+    function setQrCache(cache) {
+        const s = getSettings();
+        s.qrCache = cache;
+        s.qrCacheVersion = 1;
+        saveSettings();
+    }
+
+    function collectActiveQuickReplySets() {
+        const api = getQuickReplyApi();
+        if (!api?.settings) {
+            return { status: 'missing', sets: [], message: 'Quick Reply is not loaded.' };
+        }
+        if (!api.settings.isEnabled) {
+            return { status: 'disabled', sets: [], message: 'Quick Reply is disabled.' };
+        }
+
+        const sources = [
+            ['Global', api.settings.config?.setList || []],
+            ['Chat', api.settings.chatConfig?.setList || []],
+            ['Character', api.settings.charConfig?.setList || []],
+        ];
+        const seen = new Set();
+        const sets = [];
+
+        for (const [scope, links] of sources) {
+            for (const link of links || []) {
+                const set = link?.set;
+                if (!set || link.isVisible === false || set.isDeleted) continue;
+                const visibleReplies = (set.qrList || []).filter(qr => qr && !qr.isHidden && qr.message?.length > 0);
+                if (!visibleReplies.length) continue;
+
+                const key = `${scope}::${set.name}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+
+                sets.push({
+                    name: set.name || '(unnamed set)',
+                    scope,
+                    disableSend: !!set.disableSend,
+                    placeBeforeInput: !!set.placeBeforeInput,
+                    injectInput: !!set.injectInput,
+                    color: set.color || '',
+                    onlyBorderColor: !!set.onlyBorderColor,
+                    replies: visibleReplies.map(qr => ({
+                        id: qr.id,
+                        label: qr.label || `QR ${qr.id ?? ''}`.trim(),
+                        title: qr.title || '',
+                        icon: qr.icon || '',
+                        showLabel: !!qr.showLabel,
+                        message: qr.message || '',
+                        automationId: qr.automationId || '',
+                    })),
+                });
+            }
+        }
+
+        return { status: 'ok', sets, message: '' };
+    }
+
+    function refreshQuickReplyCache() {
+        const result = collectActiveQuickReplySets();
+        const cache = {
+            status: result.status,
+            message: result.message,
+            sets: result.sets,
+            cachedAt: new Date().toISOString(),
+        };
+        setQrCache(cache);
+        renderQuickReplyTab();
+
+        if (result.status === 'ok') {
+            const qrCount = result.sets.reduce((sum, set) => sum + set.replies.length, 0);
+            toastr?.success(`Cached ${result.sets.length} QR set${result.sets.length !== 1 ? 's' : ''} · ${qrCount} quick repl${qrCount === 1 ? 'y' : 'ies'}.`, EXT_DISPLAY);
+        } else {
+            toastr?.warning(result.message, EXT_DISPLAY);
+        }
+    }
+
+    async function executeCachedQuickReply(setName, label, id) {
+        try {
+            const api = getQuickReplyApi();
+            const set = api?.getSetByName?.(setName);
+            const qrId = Number(id);
+            const qr = set?.qrList?.find(item => {
+                if (item.isHidden) return false;
+                if (Number.isFinite(qrId)) return Number(item.id) === qrId;
+                return item.label === label;
+            });
+            if (qr?.execute) {
+                await qr.execute({}, false, true, {});
+                return;
+            }
+            if (typeof globalThis.executeQuickReplyByName === 'function') {
+                await globalThis.executeQuickReplyByName(`${setName}.${label}`, {}, {});
+                return;
+            }
+            throw new Error('Quick Reply is not ready.');
+        } catch (e) {
+            console.error(`[${EXT_DISPLAY}] Quick Reply execution failed:`, e);
+            toastr?.error(`Failed to run QR: ${e.message}`, EXT_DISPLAY);
+        }
     }
 
     async function init() {
@@ -246,11 +373,14 @@
             // Render from cache for this character
             renderFromCache();
         }
+
+        if (_isOpen && getSettings().activeTab === 'qr') renderQuickReplyTab();
     }
 
     function buildWindowHTML() {
         const s = getSettings();
         const charName = getCharacterName() || '—';
+        const activeTab = s.activeTab === 'qr' ? 'qr' : 'hub';
         const cpCollapsed = s.checkpointsCollapsed ? ' collapsed' : '';
         const brCollapsed = s.branchesCollapsed ? ' collapsed' : '';
 
@@ -286,7 +416,17 @@
             </div>
         </div>
 
+        <div class="ikcp-tabs" role="tablist">
+            <button type="button" class="ikcp-tab${activeTab === 'hub' ? ' active' : ''}" data-tab="hub">
+                <i class="fa-solid fa-code-branch"></i><span>Hub</span>
+            </button>
+            <button type="button" class="ikcp-tab${activeTab === 'qr' ? ' active' : ''}" data-tab="qr">
+                <i class="fa-solid fa-bolt"></i><span>QR</span>
+            </button>
+        </div>
+
         <div class="ikcp-content">
+            <div class="ikcp-tab-panel${activeTab === 'hub' ? ' active' : ''}" data-tab-panel="hub">
             <div class="ikcp-section" data-section="checkpoints">
                 <div class="ikcp-section-header${cpCollapsed}">
                     <span class="ikcp-section-chevron"><i class="fa-solid fa-chevron-down"></i></span>
@@ -319,6 +459,21 @@
                     </div>
                 </div>
             </div>
+
+            </div>
+
+            <div class="ikcp-tab-panel${activeTab === 'qr' ? ' active' : ''}" data-tab-panel="qr">
+                <div class="ikcp-qr-toolbar">
+                    <input class="ikcp-search-input ikcp-qr-search" type="text" placeholder="Search cached quick replies…" value="${escAttr(_qrFilter)}" />
+                    <button class="ikcp-sort-btn ikcp-qr-refresh" type="button" title="Refresh QR cache">
+                        <i class="fa-solid fa-rotate"></i> Refresh
+                    </button>
+                </div>
+                <div class="ikcp-qr-cache-meta" data-qr-cache-meta></div>
+                <div class="ikcp-card-list ikcp-qr-list" data-list="quick-replies">
+                    <div class="ikcp-empty">Click Refresh to cache active Quick Reply sets.</div>
+                </div>
+            </div>
         </div>
         `;
     }
@@ -348,6 +503,24 @@
         win.querySelector('.ikcp-btn-sync').addEventListener('click', (e) => { e.stopPropagation(); syncAllCharacterChats(); });
         win.querySelector('.ikcp-btn-deep-scan').addEventListener('click', (e) => { e.stopPropagation(); deepScanBranches(); });
 
+        win.querySelectorAll('.ikcp-tab').forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                e.preventDefault();
+                setActiveTab(tab.dataset.tab);
+            });
+        });
+
+        win.querySelector('.ikcp-qr-refresh')?.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            refreshQuickReplyCache();
+        });
+
+        win.querySelector('.ikcp-qr-search')?.addEventListener('input', (e) => {
+            _qrFilter = e.target.value.trim().toLowerCase();
+            renderQuickReplyTab();
+        });
+
         win.querySelectorAll('.ikcp-section-header').forEach(header => {
             header.addEventListener('click', (e) => {
                 if (e.target.closest('.ikcp-section-action')) return;
@@ -359,19 +532,19 @@
             });
         });
 
-        win.querySelectorAll('.ikcp-search-input').forEach(input => {
+        win.querySelectorAll('.ikcp-search-input:not(.ikcp-qr-search)').forEach(input => {
             input.addEventListener('input', (e) => {
                 _currentFilter = e.target.value.trim().toLowerCase();
-                win.querySelectorAll('.ikcp-search-input').forEach(si => { if (si !== e.target) si.value = e.target.value; });
+                win.querySelectorAll('.ikcp-search-input:not(.ikcp-qr-search)').forEach(si => { if (si !== e.target) si.value = e.target.value; });
                 renderFromCache();
             });
         });
 
-        win.querySelectorAll('.ikcp-sort-btn').forEach(btn => {
+        win.querySelectorAll('.ikcp-sort-btn:not(.ikcp-qr-refresh)').forEach(btn => {
             btn.addEventListener('click', () => {
                 s.sortMode = s.sortMode === 'date' ? 'name' : 'date';
                 saveSettings();
-                win.querySelectorAll('.ikcp-sort-btn').forEach(b => { b.textContent = s.sortMode === 'name' ? '↓ A-Z' : '↓ Date'; });
+                win.querySelectorAll('.ikcp-sort-btn:not(.ikcp-qr-refresh)').forEach(b => { b.textContent = s.sortMode === 'name' ? '↓ A-Z' : '↓ Date'; });
                 renderFromCache();
             });
         });
@@ -387,6 +560,18 @@
         dock.addEventListener('click', () => toggleWindow());
         document.body.appendChild(dock);
         _dockEl = dock;
+    }
+
+    function setActiveTab(tabName) {
+        const tab = tabName === 'qr' ? 'qr' : 'hub';
+        const s = getSettings();
+        s.activeTab = tab;
+        saveSettings();
+        if (!_windowEl) return;
+        _windowEl.querySelectorAll('.ikcp-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === tab));
+        _windowEl.querySelectorAll('.ikcp-tab-panel').forEach(el => el.classList.toggle('active', el.dataset.tabPanel === tab));
+        if (tab === 'qr') renderQuickReplyTab();
+        else renderFromCache();
     }
 
     function showWindow() {
@@ -406,6 +591,7 @@
         const badge = _windowEl.querySelector('.ikcp-char-badge');
         if (badge) badge.textContent = getCharacterName() || '—';
         renderFromCache();
+        if (getSettings().activeTab === 'qr') renderQuickReplyTab();
     }
 
     function hideWindow() {
@@ -1190,6 +1376,127 @@
         const brCount = _windowEl.querySelector('[data-section="branches"] .ikcp-section-count');
         if (cpCount) cpCount.textContent = `(0)`;
         if (brCount) brCount.textContent = `(0)`;
+    }
+
+    function formatCacheDate(dateStr) {
+        if (!dateStr) return 'Never refreshed';
+        const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return 'Last refresh unknown';
+        return `Cached ${formatDate(dateStr)}`;
+    }
+
+    function qrMatchesFilter(setInfo, qr) {
+        if (!_qrFilter) return true;
+        const haystack = `${setInfo.name} ${setInfo.scope} ${qr.label} ${qr.title} ${qr.message} ${qr.automationId}`.toLowerCase();
+        return haystack.includes(_qrFilter);
+    }
+
+    function renderQuickReplyTab() {
+        if (!_windowEl) return;
+        const listEl = _windowEl.querySelector('[data-list="quick-replies"]');
+        const metaEl = _windowEl.querySelector('[data-qr-cache-meta]');
+        if (!listEl) return;
+
+        const cache = getQrCache();
+        if (metaEl) {
+            const count = (cache.sets || []).reduce((sum, set) => sum + (set.replies?.length || 0), 0);
+            metaEl.textContent = `${formatCacheDate(cache.cachedAt)} · ${cache.sets?.length || 0} set${(cache.sets?.length || 0) === 1 ? '' : 's'} · ${count} QR${count === 1 ? '' : 's'}`;
+        }
+
+        if (!cache.cachedAt) {
+            listEl.innerHTML = '<div class="ikcp-empty">Click Refresh to cache active Quick Reply sets.</div>';
+            return;
+        }
+        if (cache.status && cache.status !== 'ok') {
+            listEl.innerHTML = `<div class="ikcp-empty">${escHtml(cache.message || 'Quick Reply cache is unavailable.')}</div>`;
+            return;
+        }
+
+        const sets = (cache.sets || [])
+            .map(setInfo => ({ ...setInfo, replies: (setInfo.replies || []).filter(qr => qrMatchesFilter(setInfo, qr)) }))
+            .filter(setInfo => setInfo.replies.length > 0);
+
+        if (!sets.length) {
+            listEl.innerHTML = _qrFilter
+                ? '<div class="ikcp-empty">No cached quick replies match your search.</div>'
+                : '<div class="ikcp-empty">No active visible QR sets were cached. Click Refresh after enabling QR sets.</div>';
+            return;
+        }
+
+        listEl.innerHTML = sets.map(buildQrSetHTML).join('');
+        wireQuickReplyEvents(listEl);
+    }
+
+    function buildQrSetHTML(setInfo) {
+        const s = getSettings();
+        const key = `${setInfo.scope}::${setInfo.name}`;
+        const collapsed = !!s.qrCollapsedSets[key];
+        const setColor = setInfo.color && setInfo.color !== 'transparent' ? ` style="--ikcp-qr-set-color:${escAttr(setInfo.color)}"` : '';
+        const replies = collapsed ? '' : setInfo.replies.map(qr => buildQrCardHTML(setInfo, qr)).join('');
+        return `
+        <div class="ikcp-qr-set${collapsed ? ' collapsed' : ''}" data-qr-set-key="${escAttr(key)}"${setColor}>
+            <div class="ikcp-qr-set-header" data-action="toggle-qr-set" data-qr-set-key="${escAttr(key)}">
+                <span class="ikcp-section-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+                <span class="ikcp-qr-set-name"><i class="fa-solid fa-layer-group"></i>${escHtml(setInfo.name)}</span>
+                <span class="ikcp-badge ikcp-badge-accent">${escHtml(setInfo.scope)}</span>
+                <span class="ikcp-section-count">${setInfo.replies.length}</span>
+            </div>
+            <div class="ikcp-qr-set-body">
+                ${replies}
+            </div>
+        </div>`;
+    }
+
+    function buildQrCardHTML(setInfo, qr) {
+        const icon = qr.icon ? `<i class="fa-solid ${escAttr(qr.icon)}"></i>` : '<i class="fa-solid fa-bolt"></i>';
+        const title = qr.title || qr.message || qr.label;
+        const automation = qr.automationId ? `<span class="ikcp-badge ikcp-badge-subtle">auto: ${escHtml(qr.automationId)}</span>` : '';
+        const sendMode = setInfo.disableSend ? '<span class="ikcp-badge ikcp-badge-subtle">no send</span>' : '';
+        return `
+        <div class="ikcp-card ikcp-qr-card" data-qr-set="${escAttr(setInfo.name)}" data-qr-label="${escAttr(qr.label)}" data-qr-id="${escAttr(qr.id ?? '')}" title="${escAttr(title)}">
+            <div class="ikcp-card-top">
+                <span class="ikcp-card-icon">${icon}</span>
+                <span class="ikcp-card-name">${escHtml(qr.label || '(unnamed QR)')}</span>
+                <span class="ikcp-card-actions">
+                    <button type="button" class="ikcp-card-action ikcp-card-action-create" data-action="run-qr" data-qr-set="${escAttr(setInfo.name)}" data-qr-label="${escAttr(qr.label)}" data-qr-id="${escAttr(qr.id ?? '')}" title="Run quick reply">
+                        <i class="fa-solid fa-play"></i>
+                    </button>
+                </span>
+            </div>
+            <div class="ikcp-card-meta">
+                ${qr.title ? `<span class="ikcp-badge ikcp-badge-accent">${escHtml(qr.title)}</span>` : ''}
+                ${automation}
+                ${sendMode}
+            </div>
+            <div class="ikcp-qr-preview">${escHtml(previewQrText(qr.message))}</div>
+        </div>`;
+    }
+
+    function wireQuickReplyEvents(listEl) {
+        listEl.querySelectorAll('[data-action="toggle-qr-set"]').forEach(header => {
+            header.addEventListener('click', (e) => {
+                e.preventDefault();
+                const key = header.dataset.qrSetKey;
+                if (!key) return;
+                const s = getSettings();
+                s.qrCollapsedSets[key] = !s.qrCollapsedSets[key];
+                saveSettings();
+                renderQuickReplyTab();
+            });
+        });
+        listEl.querySelectorAll('[data-action="run-qr"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                executeCachedQuickReply(btn.dataset.qrSet, btn.dataset.qrLabel, btn.dataset.qrId);
+            });
+        });
+        listEl.querySelectorAll('.ikcp-qr-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('.ikcp-card-action')) return;
+                executeCachedQuickReply(card.dataset.qrSet, card.dataset.qrLabel, card.dataset.qrId);
+            });
+        });
     }
 
     function itemMatchesFilter(item) {
